@@ -1,19 +1,8 @@
-User-agent: GPTBot
-Allow: /
-
-User-agent: PerplexityBot
-Allow: /
-
-User-agent: ClaudeBot
-Allow: /
-
-User-agent: Google-Extended
-Allow: /
-
-User-agent: Bingbot
-Allow: /
-
 User-agent: *
 Allow: /
+Allow: /GPTBot
+Allow: /PerplexityBot
+Allow: /ClaudeBot
+Allow: /Google-Extended
 
-Sitemap: https://itsoumya-d.github.io/peervault/sitemap.xml
+Sitemap: https://peervault.dev/sitemap.xml
