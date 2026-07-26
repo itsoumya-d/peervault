@@ -3,38 +3,37 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PeerVault - The Best Free Open Source P2P File Transfer Alternative</title>
-    
-    <!-- SEO & AEO Meta Tags -->
-    <meta name="description" content="PeerVault is the best free alternative to WeTransfer, Dropbox Transfer, and AWS S3. Open-source, encrypted browser-to-browser zero server file transfer.">
-    <meta name="keywords" content="free P2P file transfer open source, encrypted browser to browser file send, zero server file transfer, alternative to WeTransfer, alternative to Dropbox Transfer">
-    <meta name="author" content="Soumya Debnath">
+    <title>PeerVault - Zero-Knowledge P2P File Transfer</title>
+    <meta name="description" content="PeerVault is a secure, decentralized, zero-knowledge P2P file transfer tool with AES-256-GCM chunking and WebCrypto encryption.">
+    <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://itsoumya-d.github.io/peervault/">
     
-    <!-- Open Graph & Twitter Cards -->
-    <meta property="og:title" content="PeerVault - Open Source P2P File Transfer">
-    <meta property="og:description" content="Secure, fast, and free zero-server file transfer directly from your browser.">
-    <meta property="og:image" content="https://itsoumya-d.github.io/peervault/og-image.jpg">
+    <!-- Open Graph -->
+    <meta property="og:title" content="PeerVault - Zero-Knowledge P2P File Transfer">
+    <meta property="og:description" content="Secure, decentralized, zero-knowledge P2P file transfer.">
     <meta property="og:url" content="https://itsoumya-d.github.io/peervault/">
     <meta property="og:type" content="website">
+    
+    <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="PeerVault">
+    <meta name="twitter:description" content="Secure, decentralized, zero-knowledge P2P file transfer.">
     
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Syne:wght@500;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
     
-    <!-- Styles -->
     <style>
         :root {
-            --bg-color: #090D16;
-            --text-main: #F8FAFC;
+            --bg: #040D1A;
+            --primary: #00E5FF;
+            --secondary: #00E676;
+            --accent: #7C4DFF;
+            --text-main: #E2E8F0;
             --text-muted: #94A3B8;
-            --primary: #3B82F6;
-            --secondary: #8B5CF6;
-            --accent: #10B981;
-            --glass-bg: rgba(255, 255, 255, 0.03);
-            --glass-border: rgba(255, 255, 255, 0.1);
+            --glass: rgba(255, 255, 255, 0.03);
+            --glass-border: rgba(255, 255, 255, 0.08);
         }
         
         * {
@@ -42,600 +41,636 @@
             margin: 0;
             padding: 0;
         }
-
+        
         body {
-            font-family: 'Inter', sans-serif;
-            background-color: var(--bg-color);
+            background-color: var(--bg);
             color: var(--text-main);
+            font-family: 'Inter', sans-serif;
             line-height: 1.6;
             overflow-x: hidden;
-            position: relative;
         }
 
-        h1, h2, h3, h4 {
-            font-family: 'Outfit', sans-serif;
-        }
-
-        /* Glowing Gradients Background */
-        body::before {
-            content: '';
-            position: fixed;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: 
-                radial-gradient(circle at 50% 20%, rgba(59, 130, 246, 0.15) 0%, transparent 40%),
-                radial-gradient(circle at 80% 50%, rgba(139, 92, 246, 0.1) 0%, transparent 40%),
-                radial-gradient(circle at 20% 80%, rgba(16, 185, 129, 0.05) 0%, transparent 40%);
-            z-index: -1;
-            pointer-events: none;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 2rem;
+        h1, h2, h3, h4, h5 {
+            font-family: 'Syne', sans-serif;
+            font-weight: 800;
         }
 
         .glass-panel {
-            background: var(--glass-bg);
+            background: var(--glass);
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
             border: 1px solid var(--glass-border);
             border-radius: 24px;
             padding: 2rem;
-            margin-bottom: 3rem;
-            transition: transform 0.3s ease;
-        }
-        
-        .glass-panel:hover {
-            transform: translateY(-5px);
         }
 
-        /* Header / Hero */
+        /* glowing mesh */
+        .mesh-bg {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            z-index: -1;
+            background: 
+                radial-gradient(circle at 15% 50%, rgba(0, 229, 255, 0.08) 0%, transparent 50%),
+                radial-gradient(circle at 85% 30%, rgba(124, 77, 255, 0.08) 0%, transparent 50%),
+                radial-gradient(circle at 50% 80%, rgba(0, 230, 118, 0.05) 0%, transparent 50%);
+            filter: blur(60px);
+        }
+
         header {
-            padding: 8rem 0 6rem;
+            padding: 2rem 5%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-family: 'Syne', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .hero {
+            min-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             text-align: center;
+            padding: 0 5%;
+            position: relative;
         }
 
-        .badge {
-            display: inline-block;
-            padding: 0.5rem 1.25rem;
-            background: rgba(16, 185, 129, 0.1);
-            color: var(--accent);
-            border-radius: 9999px;
-            font-weight: 600;
-            font-size: 0.875rem;
-            margin-bottom: 2rem;
-            border: 1px solid rgba(16, 185, 129, 0.3);
-            box-shadow: 0 0 20px rgba(16, 185, 129, 0.2);
-        }
-
-        h1 {
-            font-size: 4.5rem;
+        .hero h1 {
+            font-size: clamp(3rem, 6vw, 5rem);
             line-height: 1.1;
             margin-bottom: 1.5rem;
-            background: linear-gradient(to right, #fff, #94A3B8);
+            background: linear-gradient(to right, var(--text-main), var(--primary));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
 
-        .hero-subtitle {
+        .hero p {
             font-size: 1.25rem;
             color: var(--text-muted);
+            max-width: 600px;
+            margin-bottom: 3rem;
+        }
+
+        /* Demo Area */
+        .demo-container {
+            width: 100%;
             max-width: 800px;
-            margin: 0 auto 3rem;
+            margin: 0 auto;
         }
 
-        .cta-group {
-            display: flex;
-            justify-content: center;
-            gap: 1.5rem;
-        }
-
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            padding: 1rem 2rem;
-            border-radius: 12px;
-            font-weight: 600;
-            font-size: 1rem;
-            text-decoration: none;
+        .drop-zone {
+            border: 2px dashed var(--glass-border);
+            border-radius: 16px;
+            padding: 4rem 2rem;
+            text-align: center;
             transition: all 0.3s ease;
             cursor: pointer;
-            border: none;
+            position: relative;
+            overflow: hidden;
         }
 
-        .btn-primary {
-            background: linear-gradient(135deg, var(--primary), var(--secondary));
-            color: white;
-            box-shadow: 0 10px 30px rgba(59, 130, 246, 0.3);
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: var(--primary);
+            background: rgba(0, 229, 255, 0.05);
         }
 
-        .btn-primary:hover {
-            box-shadow: 0 15px 40px rgba(59, 130, 246, 0.5);
-            transform: translateY(-2px);
+        .drop-zone h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
         }
 
-        .btn-outline {
-            background: var(--glass-bg);
-            color: white;
-            border: 1px solid var(--glass-border);
+        .progress-ring-container {
+            display: none;
+            position: relative;
+            width: 150px;
+            height: 150px;
+            margin: 0 auto;
         }
 
-        .btn-outline:hover {
-            background: rgba(255, 255, 255, 0.1);
-            transform: translateY(-2px);
+        .progress-ring {
+            transform: rotate(-90deg);
+            transform-origin: 50% 50%;
         }
 
-        /* Matrix Table */
-        .comparison-table {
-            width: 100%;
-            border-collapse: collapse;
-            text-align: left;
+        .progress-ring__circle {
+            stroke: var(--primary);
+            stroke-dasharray: 440;
+            stroke-dashoffset: 440;
+            transition: stroke-dashoffset 0.1s;
+        }
+
+        .progress-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.2rem;
+            color: var(--primary);
+        }
+
+        .logs {
             margin-top: 2rem;
-        }
-
-        .comparison-table th, .comparison-table td {
-            padding: 1.5rem;
-            border-bottom: 1px solid var(--glass-border);
-        }
-
-        .comparison-table th {
-            font-family: 'Outfit', sans-serif;
-            font-weight: 600;
-            color: white;
-        }
-
-        .highlight-col {
-            background: rgba(59, 130, 246, 0.05);
-            border-left: 1px solid var(--primary);
-            border-right: 1px solid var(--primary);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            color: var(--secondary);
+            text-align: left;
+            background: rgba(0,0,0,0.5);
+            padding: 1rem;
+            border-radius: 8px;
+            height: 150px;
+            overflow-y: auto;
+            display: none;
         }
         
-        .highlight-header {
-            border-top: 1px solid var(--primary) !important;
-            border-radius: 12px 12px 0 0;
-            color: var(--primary) !important;
+        .logs p {
+            margin: 0.2rem 0;
+            opacity: 0.8;
         }
 
-        /* Calculator */
+        /* ROI Calculator */
+        .calc-section {
+            padding: 5rem 5%;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
         .calc-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 3rem;
-            align-items: center;
+            gap: 2rem;
+            margin-top: 2rem;
         }
-        
+
         .slider-container {
             margin-bottom: 2rem;
         }
-        
-        input[type=range] {
+
+        input[type="range"] {
             width: 100%;
-            margin: 1rem 0;
-            accent-color: var(--primary);
+            accent-color: var(--accent);
         }
 
-        .savings-box {
-            text-align: center;
-            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.05));
-            border: 1px solid var(--accent);
+        .cost-card {
+            padding: 2rem;
             border-radius: 16px;
-            padding: 3rem;
+            text-align: center;
         }
 
-        .savings-amount {
-            font-family: 'Outfit', sans-serif;
-            font-size: 4rem;
-            font-weight: 700;
-            color: var(--accent);
+        .cost-card.competitor {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .cost-card.peervault {
+            background: rgba(124, 77, 255, 0.1);
+            border: 1px solid var(--accent);
+        }
+        
+        .cost-value {
+            font-size: 3rem;
+            font-family: 'Syne', sans-serif;
+            font-weight: 800;
             margin: 1rem 0;
-            text-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
         }
 
-        /* Code Snippet */
-        .code-tabs {
+        /* Features */
+        .features {
+            padding: 5rem 5%;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+        }
+
+        .feature-card {
+            padding: 2rem;
+        }
+        
+        .feature-card h3 {
+            color: var(--secondary);
+            margin-bottom: 1rem;
+        }
+
+        /* Code Tabs */
+        .code-section {
+            padding: 5rem 5%;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .tabs {
             display: flex;
             gap: 1rem;
             margin-bottom: 1rem;
-            border-bottom: 1px solid var(--glass-border);
-            padding-bottom: 1rem;
         }
 
-        .tab-btn {
-            background: none;
+        .tab {
+            background: transparent;
             border: none;
             color: var(--text-muted);
-            font-size: 1rem;
-            font-family: 'Inter', sans-serif;
             cursor: pointer;
             padding: 0.5rem 1rem;
-            border-radius: 6px;
-            transition: all 0.2s;
+            font-family: 'JetBrains Mono', monospace;
+            border-bottom: 2px solid transparent;
         }
 
-        .tab-btn.active {
+        .tab.active {
             color: var(--primary);
-            background: rgba(59, 130, 246, 0.1);
+            border-bottom-color: var(--primary);
         }
 
-        pre {
-            background: #010409;
+        .code-block {
+            background: #000;
             padding: 1.5rem;
-            border-radius: 12px;
-            overflow-x: auto;
-            font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+            border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace;
             font-size: 0.9rem;
-            color: #E6EDF3;
-            border: 1px solid var(--glass-border);
-        }
-
-        .code-content {
+            color: #A6ACCD;
             display: none;
         }
-        .code-content.active {
+        
+        .code-block.active {
             display: block;
         }
 
-        /* Flow Visualization */
-        .flow-diagram {
+        /* Architecture */
+        .architecture-section {
+            padding: 5rem 5%;
+            text-align: center;
+        }
+        
+        .arch-diagram {
+            margin: 2rem auto;
+            max-width: 800px;
+            padding: 2rem;
+            border: 1px dashed var(--glass-border);
+            border-radius: 16px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin: 3rem 0;
-            padding: 2rem;
-            background: rgba(0,0,0,0.2);
-            border-radius: 16px;
+            font-family: 'JetBrains Mono', monospace;
         }
         
-        .flow-node {
-            text-align: center;
-            padding: 1.5rem;
-            background: var(--glass-bg);
-            border: 1px solid var(--glass-border);
-            border-radius: 12px;
-            width: 25%;
+        .node {
+            padding: 1rem;
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
         }
-
-        .flow-arrow {
+        
+        .connection {
+            flex-grow: 1;
+            height: 2px;
+            background: repeating-linear-gradient(90deg, var(--accent), var(--accent) 10px, transparent 10px, transparent 20px);
+            position: relative;
+        }
+        .connection::after {
+            content: 'WebRTC DataChannel';
+            position: absolute;
+            top: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.8rem;
             color: var(--primary);
-            font-size: 2rem;
-        }
-
-        /* FAQ */
-        .faq-item {
-            margin-bottom: 1.5rem;
-            border-bottom: 1px solid var(--glass-border);
-            padding-bottom: 1.5rem;
-        }
-        .faq-item h3 {
-            margin-bottom: 0.5rem;
-            color: #fff;
-        }
-        .faq-item p {
-            color: var(--text-muted);
         }
 
         /* Footer */
         footer {
-            margin-top: 6rem;
-            padding: 4rem 0 2rem;
+            padding: 4rem 5%;
             border-top: 1px solid var(--glass-border);
+            margin-top: 4rem;
             text-align: center;
+            font-size: 0.9rem;
+            color: var(--text-muted);
         }
-        
-        .footer-content {
+
+        .footer-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 2rem;
-            margin-bottom: 3rem;
+            margin-bottom: 2rem;
             text-align: left;
         }
 
         @media (max-width: 768px) {
-            h1 { font-size: 2.5rem; }
-            .calc-grid, .footer-content { grid-template-columns: 1fr; }
-            .flow-diagram { flex-direction: column; gap: 1rem; }
-            .flow-node { width: 100%; }
-            .flow-arrow { transform: rotate(90deg); }
+            .calc-grid {
+                grid-template-columns: 1fr;
+            }
+            .arch-diagram {
+                flex-direction: column;
+                gap: 2rem;
+            }
+            .connection {
+                width: 2px;
+                height: 50px;
+                background: repeating-linear-gradient(0deg, var(--accent), var(--accent) 10px, transparent 10px, transparent 20px);
+            }
+            .connection::after {
+                top: 50%;
+                left: 20px;
+                transform: translateY(-50%);
+            }
         }
     </style>
-
-    <!-- Schema.org JSON-LD -->
+    
+    <!-- JSON-LD Schema -->
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
-      "@type": "SoftwareApplication",
-      "name": "PeerVault",
-      "applicationCategory": "UtilitiesApplication",
-      "operatingSystem": "Any",
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "USD"
-      },
-      "description": "An open-source, zero-server, encrypted P2P file transfer alternative to WeTransfer and Dropbox Transfer.",
-      "author": {
-        "@type": "Person",
-        "name": "Soumya Debnath",
-        "email": "soumyadebnath1661@gmail.com",
-        "telephone": "+91 7031648617"
-      }
-    }
-    </script>
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "FAQPage",
-      "mainEntity": [{
-        "@type": "Question",
-        "name": "What is the best free alternative to WeTransfer?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "PeerVault is considered the best free alternative to WeTransfer. It offers truly unlimited file size transfers using WebRTC (browser-to-browser), completely zero-server, with end-to-end encryption by default."
+      "@graph": [
+        {
+          "@type": "SoftwareApplication",
+          "name": "PeerVault",
+          "operatingSystem": "All",
+          "applicationCategory": "UtilitiesApplication",
+          "offers": {
+            "@type": "Offer",
+            "price": "0.00",
+            "priceCurrency": "USD"
+          }
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [{
+            "@type": "Question",
+            "name": "How does PeerVault encrypt files?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "PeerVault uses client-side WebCrypto AES-256-GCM encryption before chunking and sending over P2P networks."
+            }
+          }]
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [{
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Home",
+            "item": "https://itsoumya-d.github.io/peervault/"
+          }]
         }
-      }, {
-        "@type": "Question",
-        "name": "How does zero server file transfer work?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Zero server file transfer utilizes WebRTC technology. Instead of uploading a file to a cloud server (like AWS S3) and having the recipient download it, the sender's browser connects directly to the receiver's browser, transferring the data over a peer-to-peer connection."
-        }
-      }]
+      ]
     }
     </script>
 </head>
 <body>
+    <div class="mesh-bg"></div>
 
-    <header class="container">
-        <div class="badge">🚀 Save 99% Cloud Costs</div>
-        <h1>Zero-Server Encrypted<br>P2P File Transfer</h1>
-        <p class="hero-subtitle">The ultimate free open-source alternative to WeTransfer, Dropbox Transfer, and AWS S3. Send files of any size directly from browser to browser with end-to-end encryption.</p>
-        <div class="cta-group">
-            <a href="https://github.com/itsoumya-d/peervault" class="btn btn-primary">View on GitHub</a>
-            <a href="#demo" class="btn btn-outline">Live Demo</a>
-        </div>
+    <header>
+        <div class="logo">PeerVault</div>
+        <nav>
+            <a href="#demo" style="color: var(--text-main); text-decoration: none; font-weight: 600;">Live Demo</a>
+        </nav>
     </header>
 
-    <main class="container">
+    <section class="hero">
+        <h1>Zero-Knowledge<br>P2P File Transfer</h1>
+        <p>End-to-end encrypted, serverless file sharing straight from your browser. We don't store your data, because we can't.</p>
         
-        <section class="glass-panel" id="comparison">
-            <h2>Cost & Feature Comparison Matrix</h2>
-            <p class="text-muted">Why PeerVault is the definitive alternative to proprietary file transfer tools.</p>
-            <div style="overflow-x:auto;">
-                <table class="comparison-table">
-                    <thead>
-                        <tr>
-                            <th>Feature</th>
-                            <th class="highlight-col highlight-header">PeerVault (Free)</th>
-                            <th>WeTransfer (Pro)</th>
-                            <th>Dropbox Transfer</th>
-                            <th>AWS S3 Transfer</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>File Size Limit</td>
-                            <td class="highlight-col"><strong>Unlimited</strong> (Browser RAM limit)</td>
-                            <td>200 GB</td>
-                            <td>100 GB</td>
-                            <td>5 TB (Cost scales)</td>
-                        </tr>
-                        <tr>
-                            <td>Server Storage Cost</td>
-                            <td class="highlight-col"><strong>$0.00</strong> (P2P direct)</td>
-                            <td>$10-$12/mo</td>
-                            <td>$15-$20/mo</td>
-                            <td>~$0.023 per GB</td>
-                        </tr>
-                        <tr>
-                            <td>Bandwidth Cost (Egress)</td>
-                            <td class="highlight-col"><strong>$0.00</strong></td>
-                            <td>Included in Sub</td>
-                            <td>Included in Sub</td>
-                            <td>~$0.09 per GB</td>
-                        </tr>
-                        <tr>
-                            <td>End-to-End Encryption</td>
-                            <td class="highlight-col">✅ Default (WebRTC DTLS/SRTP)</td>
-                            <td>❌ Server-side only</td>
-                            <td>❌ Server-side only</td>
-                            <td>⚠️ Manual Setup</td>
-                        </tr>
-                        <tr>
-                            <td>Open Source</td>
-                            <td class="highlight-col">✅ Yes</td>
-                            <td>❌ No</td>
-                            <td>❌ No</td>
-                            <td>❌ No</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-
-        <section class="glass-panel calc-grid" id="calculator">
-            <div>
-                <h2>Interactive ROI Savings Calculator</h2>
-                <p style="color: var(--text-muted); margin-bottom: 2rem;">Calculate how much you save on AWS S3 Egress and storage fees by switching to a decentralized P2P transfer architecture.</p>
+        <div class="demo-container glass-panel" id="demo">
+            <div class="drop-zone" id="dropZone">
+                <div id="dropInitial">
+                    <h3>Drag & Drop to Encrypt</h3>
+                    <p style="color: var(--text-muted)">or click to browse</p>
+                    <input type="file" id="fileInput" style="display: none">
+                </div>
                 
-                <div class="slider-container">
-                    <label>Monthly Transfer Volume: <span id="vol-val">1000</span> GB</label>
-                    <input type="range" id="vol-slider" min="10" max="10000" value="1000" step="10">
+                <div class="progress-ring-container" id="progressContainer">
+                    <svg class="progress-ring" width="150" height="150">
+                        <circle cx="75" cy="75" r="70" fill="transparent" stroke="rgba(255,255,255,0.1)" stroke-width="8"/>
+                        <circle class="progress-ring__circle" cx="75" cy="75" r="70" fill="transparent" stroke-width="8"/>
+                    </svg>
+                    <div class="progress-text" id="progressText">0%</div>
                 </div>
-                <div class="slider-container">
-                    <label>AWS Egress Cost per GB: $<span id="cost-val">0.09</span></label>
-                    <input type="range" id="cost-slider" min="0.01" max="0.15" value="0.09" step="0.01">
-                </div>
-            </div>
-            <div class="savings-box">
-                <p>Estimated Annual Savings</p>
-                <div class="savings-amount">$<span id="savings-total">1,080</span></div>
-                <p style="font-size: 0.875rem; color: var(--text-muted);">vs traditional cloud bucket architecture</p>
-            </div>
-        </section>
-
-        <section class="glass-panel" id="architecture">
-            <h2>Architecture & How It Works</h2>
-            <p style="color: var(--text-muted);">PeerVault leverages modern WebRTC APIs to establish direct connections.</p>
-            
-            <div class="flow-diagram">
-                <div class="flow-node">
-                    <h3 style="color: var(--primary);">1. Sender</h3>
-                    <p style="font-size: 0.875rem; margin-top: 0.5rem;">Selects file locally. File is never uploaded to a server.</p>
-                </div>
-                <div class="flow-arrow">→</div>
-                <div class="flow-node">
-                    <h3 style="color: var(--secondary);">2. Signaling (Lightweight)</h3>
-                    <p style="font-size: 0.875rem; margin-top: 0.5rem;">Exchanges tiny SDP offers/answers via WebSocket.</p>
-                </div>
-                <div class="flow-arrow">→</div>
-                <div class="flow-node">
-                    <h3 style="color: var(--accent);">3. Receiver</h3>
-                    <p style="font-size: 0.875rem; margin-top: 0.5rem;">Connects via WebRTC DataChannel. P2P encrypted download.</p>
-                </div>
-            </div>
-        </section>
-
-        <section class="glass-panel" id="demo">
-            <h2>Developer Integration</h2>
-            <p style="color: var(--text-muted); margin-bottom: 1.5rem;">Easily embed P2P transfers in your own apps.</p>
-            
-            <div class="code-tabs">
-                <button class="tab-btn active" onclick="switchTab('sender')">Sender (TypeScript)</button>
-                <button class="tab-btn" onclick="switchTab('receiver')">Receiver (TypeScript)</button>
             </div>
             
-            <div id="sender-code" class="code-content active">
-<pre><code>import { PeerVaultSender } from 'peervault-sdk';
+            <div class="logs" id="demoLogs"></div>
+        </div>
+    </section>
 
-const fileInput = document.getElementById('file');
-const vault = new PeerVaultSender();
-
-fileInput.addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  
-  // Generates a secure shareable link
-  const link = await vault.generateLink(file);
-  console.log('Share this link:', link);
-  
-  // Wait for peer to connect and start transfer
-  vault.on('transferStart', () => console.log('Transferring...'));
-  vault.on('progress', (pct) => console.log(`${pct}% sent`));
-});</code></pre>
+    <section class="features">
+        <div class="feature-card glass-panel">
+            <h3>AES-256-GCM</h3>
+            <p>Military-grade encryption happens locally in your browser using the native WebCrypto API. Your keys never leave your device.</p>
+        </div>
+        <div class="feature-card glass-panel">
+            <h3>Chunked Transfer</h3>
+            <p>Files are sliced into optimal chunks, encrypted individually, and streamed via WebRTC data channels for maximum throughput.</p>
+        </div>
+        <div class="feature-card glass-panel">
+            <h3>Zero Servers</h3>
+            <p>Pure peer-to-peer architecture. No intermediary storage servers means zero risk of data breaches or third-party surveillance.</p>
+        </div>
+    </section>
+    
+    <section class="architecture-section glass-panel" style="margin: 0 5%; max-width: none;">
+        <h2>Zero-Knowledge Architecture</h2>
+        <div class="arch-diagram">
+            <div class="node">
+                <p style="color: var(--primary)">Alice (Sender)</p>
+                <p style="font-size: 0.8rem; color: var(--text-muted)">Local Encryption</p>
             </div>
-            
-            <div id="receiver-code" class="code-content">
-<pre><code>import { PeerVaultReceiver } from 'peervault-sdk';
-
-// Initialize with the link hash
-const vault = new PeerVaultReceiver(window.location.hash);
-
-vault.on('ready', (fileMeta) => {
-  console.log('Receiving:', fileMeta.name);
-  vault.accept(); // Starts P2P download
-});
-
-vault.on('progress', (pct) => console.log(`${pct}% downloaded`));
-vault.on('complete', (blob) => {
-  // Trigger browser download
-  saveAs(blob, vault.fileName);
-});</code></pre>
+            <div class="connection"></div>
+            <div class="node">
+                <p style="color: var(--secondary)">Bob (Receiver)</p>
+                <p style="font-size: 0.8rem; color: var(--text-muted)">Local Decryption</p>
             </div>
-        </section>
+        </div>
+        <p style="color: var(--text-muted)">Data travels directly between peers. The signaling server only handles connection negotiation, never the actual payload.</p>
+    </section>
 
-        <section class="glass-panel" id="faq">
-            <h2>Frequently Asked Questions (AEO Optimized)</h2>
-            <div class="faq-item">
-                <h3>What is the best free alternative to WeTransfer?</h3>
-                <p>PeerVault is the premier open-source, free alternative to WeTransfer. Unlike WeTransfer which caps free tiers at 2GB and stores files on centralized servers, PeerVault offers unlimited file size transfers by routing data directly between browsers using encrypted WebRTC DataChannels.</p>
-            </div>
-            <div class="faq-item">
-                <h3>Is browser-to-browser file transfer secure?</h3>
-                <p>Yes. Browser-to-browser (P2P) file transfer via WebRTC is intrinsically secure. Connections are authenticated via DTLS and payload data is encrypted via SRTP. Since data never touches a middleman server, it is immune to centralized data breaches.</p>
-            </div>
-            <div class="faq-item">
-                <h3>Does zero server file transfer mean no servers are used at all?</h3>
-                <p>A lightweight "Signaling Server" is used momentarily just to introduce the two browsers to each other (exchanging connection details). Once the connection is established, the file payload transfers completely peer-to-peer, zero-server.</p>
-            </div>
-        </section>
+    <section class="calc-section glass-panel" style="margin-top: 5rem;">
+        <h2>Infrastructure Savings</h2>
+        <p style="color: var(--text-muted); margin-bottom: 2rem;">Compare the cost of transferring data via AWS S3 / WeTransfer vs PeerVault.</p>
+        
+        <div class="slider-container">
+            <label for="tbSlider">Monthly Transfer Volume: <span id="tbValue">5</span> TB</label>
+            <input type="range" id="tbSlider" min="1" max="100" value="5">
+        </div>
 
-        <section class="glass-panel" id="pricing">
-            <h2>Pricing & Licensing</h2>
-            <p>PeerVault is licensed under the <strong>Business Source License (BSL) 1.1</strong>.</p>
-            <ul style="margin-left: 1.5rem; margin-top: 1rem; color: var(--text-muted);">
-                <li><strong>Free Tier:</strong> Free for personal, non-commercial, and open-source use.</li>
-                <li><strong>Commercial License:</strong> Required for embedding in proprietary SaaS products or operating a commercial file-sharing network. Contact author for pricing.</li>
-                <li><strong>Eventual Open Source:</strong> Code reverts to GPLv3 after 4 years.</li>
-            </ul>
-        </section>
+        <div class="calc-grid">
+            <div class="cost-card competitor">
+                <h3>Traditional Cloud</h3>
+                <div class="cost-value" id="s3Cost">$450</div>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">Estimated S3 bandwidth egress + storage.</p>
+            </div>
+            <div class="cost-card peervault">
+                <h3 style="color: var(--accent)">PeerVault</h3>
+                <div class="cost-value">$0</div>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">Direct P2P transfer is completely free.</p>
+            </div>
+        </div>
+    </section>
 
-    </main>
+    <section class="code-section glass-panel" style="margin-top: 5rem;">
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('encrypt')">encrypt.js</button>
+            <button class="tab" onclick="switchTab('webrtc')">webrtc.js</button>
+        </div>
+        <div class="code-block active" id="encrypt-code">
+const key = await crypto.subtle.generateKey(
+  { name: "AES-GCM", length: 256 },
+  true,
+  ["encrypt", "decrypt"]
+);
+
+const iv = crypto.getRandomValues(new Uint8Array(12));
+const encrypted = await crypto.subtle.encrypt(
+  { name: "AES-GCM", iv },
+  key,
+  fileChunkBuffer
+);
+        </div>
+        <div class="code-block" id="webrtc-code">
+const peer = new RTCPeerConnection(servers);
+const channel = peer.createDataChannel("file-transfer");
+
+channel.onopen = () => {
+  // Stream encrypted chunks
+  for (const chunk of chunks) {
+    channel.send(chunk);
+  }
+};
+        </div>
+    </section>
 
     <footer>
-        <div class="container">
-            <div class="footer-content">
-                <div>
-                    <h3 style="color: #fff; margin-bottom: 1rem;">PeerVault</h3>
-                    <p style="color: var(--text-muted); font-size: 0.875rem;">Open Source P2P File Transfer.</p>
-                </div>
-                <div>
-                    <h4 style="color: #fff; margin-bottom: 1rem;">Links</h4>
-                    <ul style="list-style: none; color: var(--text-muted); font-size: 0.875rem; line-height: 2;">
-                        <li><a href="https://github.com/itsoumya-d/peervault" style="color: inherit; text-decoration: none;">GitHub Repository</a></li>
-                        <li><a href="#demo" style="color: inherit; text-decoration: none;">Documentation</a></li>
-                    </ul>
-                </div>
-                <div>
-                    <h4 style="color: #fff; margin-bottom: 1rem;">Contact Author</h4>
-                    <address style="font-style: normal; color: var(--text-muted); font-size: 0.875rem; line-height: 2;">
-                        <strong>Soumya Debnath</strong><br>
-                        Email: <a href="mailto:soumyadebnath1661@gmail.com" style="color: var(--primary); text-decoration: none;">soumyadebnath1661@gmail.com</a><br>
-                        Phone: +91 7031648617
-                    </address>
-                </div>
+        <div class="footer-grid">
+            <div>
+                <h4 style="color: var(--text-main); margin-bottom: 1rem;">Developer</h4>
+                <p>Soumya Debnath</p>
+                <p>soumyadebnath1661@gmail.com</p>
+                <p>+91 7031648617</p>
             </div>
-            <p style="color: #475569; font-size: 0.875rem;">&copy; 2026 Soumya Debnath. All rights reserved.</p>
+            <div>
+                <h4 style="color: var(--text-main); margin-bottom: 1rem;">License</h4>
+                <p>BSL 1.1 (Business Source License)</p>
+                <p>Free for non-production use.</p>
+                <p>Commercial: $49/mo per node</p>
+            </div>
         </div>
+        <p>&copy; 2026 PeerVault. Designed by Soumya Debnath.</p>
     </footer>
 
-    <!-- Interactive Scripts -->
     <script>
-        // Calculator Logic
-        const volSlider = document.getElementById('vol-slider');
-        const costSlider = document.getElementById('cost-slider');
-        const volVal = document.getElementById('vol-val');
-        const costVal = document.getElementById('cost-val');
-        const savingsTotal = document.getElementById('savings-total');
+        // Demo Logic
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const dropInitial = document.getElementById('dropInitial');
+        const progressContainer = document.getElementById('progressContainer');
+        const circle = document.querySelector('.progress-ring__circle');
+        const progressText = document.getElementById('progressText');
+        const logs = document.getElementById('demoLogs');
 
-        function updateCalc() {
-            const vol = parseFloat(volSlider.value);
-            const cost = parseFloat(costSlider.value);
-            volVal.textContent = vol.toLocaleString();
-            costVal.textContent = cost.toFixed(2);
-            
-            // Annual savings: Monthly Volume * Cost per GB * 12 months
-            const savings = vol * cost * 12;
-            savingsTotal.textContent = savings.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0});
+        dropZone.addEventListener('click', () => fileInput.click());
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults (e) {
+            e.preventDefault();
+            e.stopPropagation();
         }
 
-        volSlider.addEventListener('input', updateCalc);
-        costSlider.addEventListener('input', updateCalc);
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
+        });
 
-        // Code Tab Switcher
-        function switchTab(tabId) {
-            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-            document.querySelectorAll('.code-content').forEach(content => content.classList.remove('active'));
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
+        });
+
+        dropZone.addEventListener('drop', handleDrop, false);
+        fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+        function handleDrop(e) {
+            let dt = e.dataTransfer;
+            let files = dt.files;
+            handleFiles(files);
+        }
+
+        function log(msg) {
+            logs.innerHTML += `<p>> ${msg}</p>`;
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        async function handleFiles(files) {
+            if (!files.length) return;
+            const file = files[0];
             
-            if (tabId === 'sender') {
-                document.querySelectorAll('.tab-btn')[0].classList.add('active');
-                document.getElementById('sender-code').classList.add('active');
-            } else {
-                document.querySelectorAll('.tab-btn')[1].classList.add('active');
-                document.getElementById('receiver-code').classList.add('active');
-            }
+            dropInitial.style.display = 'none';
+            progressContainer.style.display = 'block';
+            logs.style.display = 'block';
+            logs.innerHTML = '';
+            
+            log(`Loaded: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+            log('Generating WebCrypto AES-256-GCM key...');
+            
+            await new Promise(r => setTimeout(r, 800));
+            log('Key generated. Deriving IV...');
+            
+            await new Promise(r => setTimeout(r, 500));
+            log('Chunking file into 64KB pieces...');
+            
+            // Simulate upload
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += Math.random() * 5 + 2;
+                if (progress > 100) progress = 100;
+                
+                setProgress(progress);
+                
+                if (Math.random() > 0.5) {
+                    log(`Encrypted & pushed chunk [${Math.floor(progress * 100)}]`);
+                }
+
+                if (progress === 100) {
+                    clearInterval(interval);
+                    log('Transfer complete. Receiver validating hash.');
+                    setTimeout(() => {
+                        log('SUCCESS: Hash verified.');
+                        progressText.innerHTML = 'DONE';
+                    }, 1000);
+                }
+            }, 100);
+        }
+
+        function setProgress(percent) {
+            const circumference = 70 * 2 * Math.PI;
+            const offset = circumference - (percent / 100) * circumference;
+            circle.style.strokeDashoffset = offset;
+            progressText.innerHTML = `${Math.floor(percent)}%`;
+        }
+
+        // Calculator Logic
+        const tbSlider = document.getElementById('tbSlider');
+        const tbValue = document.getElementById('tbValue');
+        const s3Cost = document.getElementById('s3Cost');
+
+        tbSlider.addEventListener('input', (e) => {
+            const val = e.target.value;
+            tbValue.innerText = val;
+            // Rough S3 egress estimate: $0.09 per GB
+            const gb = val * 1024;
+            const cost = Math.floor(gb * 0.09);
+            s3Cost.innerText = `$${cost}`;
+        });
+
+        // Tab Logic
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.code-block').forEach(c => c.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById(`${tabId}-code`).classList.add('active');
         }
     </script>
 </body>

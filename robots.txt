@@ -1,6 +1,3 @@
-User-agent: *
-Allow: /
-
 User-agent: GPTBot
 Allow: /
 
@@ -16,7 +13,7 @@ Allow: /
 User-agent: Bingbot
 Allow: /
 
-User-agent: CCBot
+User-agent: *
 Allow: /
 
 Sitemap: https://itsoumya-d.github.io/peervault/sitemap.xml
