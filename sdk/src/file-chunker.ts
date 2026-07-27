@@ -8,16 +8,22 @@ export const CHUNK_SIZE = 64 * 1024; // 64KB
 export class FileChunker {
   private file: File;
   private offset = 0;
+  private sentEmptyFile = false;
 
   constructor(file: File) {
     this.file = file;
   }
 
   get totalChunks(): number {
-    return Math.ceil(this.file.size / CHUNK_SIZE);
+    return this.file.size === 0 ? 1 : Math.ceil(this.file.size / CHUNK_SIZE);
   }
 
   async getNextChunk(): Promise<ArrayBuffer | null> {
+    if (this.file.size === 0) {
+      if (this.sentEmptyFile) return null;
+      this.sentEmptyFile = true;
+      return new ArrayBuffer(0);
+    }
     if (this.offset >= this.file.size) {
       return null;
     }
