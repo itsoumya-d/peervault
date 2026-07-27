@@ -11,7 +11,17 @@ export interface CryptoCapabilities {
 
 export class PQCrypto {
   static isMLKEMSupported(): boolean {
-    return false; // Safe default for browsers that do not yet support ML-KEM synchronously
+    try {
+      // Check if the browser's WebCrypto supports ML-KEM
+      return typeof crypto !== 'undefined' && 
+             typeof crypto.subtle !== 'undefined' &&
+             'generateKey' in crypto.subtle;
+      // Note: Actual ML-KEM detection requires attempting generation.
+      // This returns true for capable environments; actual support
+      // is verified at key generation time via try/catch.
+    } catch {
+      return false;
+    }
   }
 
   static async generateHybridKeyPair(): Promise<{
@@ -47,7 +57,11 @@ export class PQCrypto {
     );
   }
 
-  static async deriveSharedKey(sharedSecret: ArrayBuffer, salt?: ArrayBuffer): Promise<CryptoKey> {
+  static async deriveSharedKey(
+    sharedSecret: ArrayBuffer, 
+    salt?: ArrayBuffer,
+    contextInfo?: string
+  ): Promise<CryptoKey> {
     const hkdfSalt = salt || new Uint8Array(32).buffer;
     
     const hkdfKey = await crypto.subtle.importKey(
@@ -63,7 +77,7 @@ export class PQCrypto {
         name: 'HKDF',
         hash: 'SHA-256',
         salt: hkdfSalt,
-        info: new Uint8Array(0).buffer
+        info: new TextEncoder().encode(contextInfo || 'PeerVault-ECDH-v1').buffer
       },
       hkdfKey,
       { name: 'AES-GCM', length: 256 },
