@@ -3,8 +3,28 @@
 // See LICENSE file for details. Production use requires a paid license.
 // Contact: soumyadebnath1661@gmail.com | +91 7031648617
 
+import { PQCrypto, CryptoCapabilities } from './pq-crypto';
+
+export interface CryptoEngineOptions {
+  useHybridKeyExchange?: boolean;
+}
+
 export class CryptoEngine {
   private key: CryptoKey | null = null;
+  private localKeyPair: CryptoKeyPair | null = null;
+  public useHybridKeyExchange: boolean;
+
+  constructor(options?: CryptoEngineOptions) {
+    this.useHybridKeyExchange = options?.useHybridKeyExchange ?? PQCrypto.isMLKEMSupported();
+  }
+
+  getCapabilities(): CryptoCapabilities {
+    return {
+      supportsMLKEM: PQCrypto.isMLKEMSupported(),
+      supportsECDH: typeof crypto !== 'undefined' && !!crypto.subtle,
+      supportsAESGCM: typeof crypto !== 'undefined' && !!crypto.subtle,
+    };
+  }
 
   async generateKey(): Promise<string> {
     this.key = await crypto.subtle.generateKey(
@@ -26,6 +46,22 @@ export class CryptoEngine {
       false,
       ['encrypt', 'decrypt']
     );
+  }
+
+  async getLocalPublicKey(): Promise<string> {
+    if (!this.localKeyPair) {
+      this.localKeyPair = await PQCrypto.generateECDHKeyPair();
+    }
+    return PQCrypto.exportPublicKey(this.localKeyPair.publicKey);
+  }
+
+  async negotiateKey(remotePeerPublicKey: string): Promise<void> {
+    if (!this.localKeyPair) {
+      this.localKeyPair = await PQCrypto.generateECDHKeyPair();
+    }
+    const remotePublic = await PQCrypto.importPublicKey(remotePeerPublicKey);
+    const sharedSecret = await PQCrypto.hybridKeyExchange(this.localKeyPair.privateKey, remotePublic);
+    this.key = await PQCrypto.deriveSharedKey(sharedSecret);
   }
 
   async encryptChunk(data: ArrayBuffer): Promise<{ iv: Uint8Array; ciphertext: ArrayBuffer }> {

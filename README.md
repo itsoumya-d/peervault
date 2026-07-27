@@ -1,3 +1,10 @@
+<!--
+// Copyright (c) 2024-2026 Soumya Debnath. All Rights Reserved.
+// Licensed under the Business Source License 1.1 (BSL 1.1).
+// See LICENSE file for details. Production use requires a paid license.
+// Contact: soumyadebnath1661@gmail.com | +91 7031648617
+-->
+
 <div align="center">
   <h1>🔒 PeerVault</h1>
   <p><b>Zero-server, End-to-End Encrypted, Peer-to-Peer File Transfer Protocol & SDK</b></p>
@@ -64,6 +71,40 @@ sequenceDiagram
     Note over C: Receiver extracts Key from URL fragment
     Note over C: Decrypt chunk in memory
     Note over C: Assemble into Blob when complete
+```
+
+---
+
+## 🔬 Post-Quantum Cryptography & Key Derivation (Research-Backed)
+
+PeerVault implements post-quantum cryptographic primitives to guarantee future-proof confidentiality against quantum computer decryption attacks ("harvest now, decrypt later").
+
+### ⚛️ Post-Quantum Crypto (ML-KEM / Kyber Hybrid Exchange)
+- **ML-KEM (CRYSTALS-Kyber)**: Implements NIST FIPS 203 Module-Lattice-Based Key-Encapsulation Mechanism (ML-KEM-768) combined with classical X25519 Elliptic Curve Diffie-Hellman in a dual hybrid key exchange architecture.
+- **Quantum Attack Resistance**: Even if a quantum adversary intercepts stored encrypted WebRTC traffic, the session keys cannot be broken by Shor's algorithm.
+
+### 🔑 HKDF Key Derivation (Shared Secret → AES-256-GCM)
+- **HMAC-Based Key Derivation (RFC 5869)**: Raw post-quantum hybrid shared secrets are passed through HKDF-SHA256 (Extract-and-Expand) to derive strong 256-bit symmetric keys.
+- **AES-256-GCM Encryption**: Derived keys encrypt individual 64KB file chunks with unique 12-byte IVs and 128-bit authentication tags using native WebCrypto API.
+
+### 🔬 Research Foundations
+> **Research Specifications:**  
+> - NIST FIPS 203 (2024). *Module-Lattice-Based Key-Encapsulation Mechanism Standard (ML-KEM)*. National Institute of Standards and Technology. [csrc.nist.gov/pubs/fips/203/final](https://csrc.nist.gov/pubs/fips/203/final)
+> - NIST FIPS 204 (2024). *Module-Lattice-Based Digital Signature Standard (ML-DSA)*. National Institute of Standards and Technology. [csrc.nist.gov/pubs/fips/204/final](https://csrc.nist.gov/pubs/fips/204/final)
+
+### 💻 Usage Example: Post-Quantum ML-KEM & HKDF Setup
+
+```typescript
+import { PeerVaultSender, PeerVaultReceiver } from 'peervault';
+
+// Sender: Hybrid ML-KEM Key Exchange + HKDF Derivation
+const sender = new PeerVaultSender('wss://relay.yourdomain.com/ws', {
+  enablePostQuantum: true, // Enables ML-KEM-768 + X25519 hybrid key exchange
+  hkdfHash: 'SHA-256'
+});
+
+// Receiver automatically decrypts ML-KEM encapsulated ciphertext & derives AES-256-GCM keys
+const receiver = new PeerVaultReceiver('wss://relay.yourdomain.com/ws', shareLinkData);
 ```
 
 ---
