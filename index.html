@@ -20,7 +20,7 @@
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Outfit:wght@600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     
     <!-- JSON-LD Structured Data -->
     <script type="application/ld+json">
@@ -58,7 +58,7 @@
     <style>
         :root {
             /* Colors */
-            --bg-color: #040D1A;
+            --bg-color: #0A1628;
             --primary: #00E5FF;
             --secondary: #00E676;
             --tertiary: #7C4DFF;
@@ -69,9 +69,9 @@
             --card-hover: rgba(255, 255, 255, 0.05);
 
             /* Typography */
-            --font-display: 'Syne', sans-serif;
+            --font-display: 'Outfit', sans-serif;
             --font-body: 'Inter', sans-serif;
-            --font-mono: 'Courier New', Courier, monospace;
+            --font-mono: 'JetBrains Mono', monospace;
             
             /* Layout & Spacing */
             --max-width: 1200px;
@@ -719,17 +719,27 @@
                         <a href="#docs" class="btn btn-secondary">Read Docs</a>
                     </div>
                 </div>
-                <div class="hero-visual reveal-up">
-                    <div class="mockup-card">
-                        <div class="mockup-icon">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                        </div>
-                        <div style="text-align: center;">
-                            <h3 style="font-size: 16px; margin-bottom: 4px;">Drop files here</h3>
+                <div class="hero-visual reveal-up" style="position: relative;">
+                    <div id="hero-fingerprint" style="position: absolute; top: 10%; left: 50%; transform: translateX(-50%); text-align: center; font-family: var(--font-mono); color: var(--primary); opacity: 0.3; font-size: 14px; white-space: nowrap; pointer-events: none; width: 100%;">SHA-256: a7:3f:b2:91:c4...</div>
+                    <div class="mockup-card" id="hero-drop-zone" style="cursor: pointer; transition: transform 0.3s, background 0.3s, border-color 0.3s; border: 2px dashed rgba(0, 229, 255, 0.5); width: 100%; max-width: 400px; height: 200px;">
+                        <div id="hero-drop-initial" style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%;">
+                            <div class="mockup-icon" style="margin-bottom: 16px;">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                            </div>
+                            <h3 style="font-size: 16px; margin-bottom: 4px;">Drop any file here</h3>
                             <p style="font-size: 12px; color: var(--text-body); margin:0;">Encrypted locally before sending</p>
                         </div>
-                        <div style="width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; margin-top: 16px;">
-                            <div style="width: 45%; height: 100%; background: var(--primary);"></div>
+                        <div id="hero-drop-progress" style="display: none; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%;">
+                            <div id="hero-file-info" style="font-family: var(--font-mono); font-size: 12px; margin-bottom: 8px; color: var(--text-heading);"></div>
+                            <div style="width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; margin-bottom: 12px;">
+                                <div id="hero-progress-bar" style="width: 0%; height: 100%; background: var(--primary);"></div>
+                            </div>
+                            <div id="hero-badges" style="display: flex; flex-direction: column; gap: 4px; font-family: var(--font-mono); font-size: 11px; width: 100%;">
+                                <div class="hero-badge" style="opacity: 0; transform: translateY(10px);">🔒 AES-256-GCM</div>
+                                <div class="hero-badge" style="opacity: 0; transform: translateY(10px);">🛡️ ML-KEM Hybrid</div>
+                                <div class="hero-badge" style="opacity: 0; transform: translateY(10px);">✅ Quantum-Safe</div>
+                            </div>
+                            <button id="hero-share-btn" class="btn btn-primary" style="opacity: 0; margin-top: 8px; font-size: 12px; height: 32px; padding: 0 16px; pointer-events: none;">Share Link</button>
                         </div>
                     </div>
                 </div>
@@ -750,6 +760,79 @@
                 <div class="metric-item">
                     <div class="metric-value">P2P</div>
                     <div class="metric-label">Direct Connection</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Post-Quantum Visualizer -->
+        <section class="container" id="quantum-visualizer" style="padding: 120px 0;">
+            <div class="text-center reveal-up">
+                <h2>Post-Quantum Hybrid Encryption</h2>
+                <p class="lead" style="margin: 16px auto;">Future-proof your data against quantum attacks.</p>
+            </div>
+            <div class="quantum-grid reveal-up" style="display: grid; grid-template-columns: 1fr auto 1fr; gap: 32px; align-items: center; margin-top: 64px;">
+                <div class="q-col" style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 32px; text-align: center;">
+                    <h3>Sender</h3>
+                    <div style="font-family: var(--font-mono); font-size: 12px; color: var(--primary); margin-top: 16px;" id="sender-key">gen_key()</div>
+                </div>
+                <div class="q-arrows" style="display: flex; flex-direction: column; gap: 24px; font-family: var(--font-mono); font-size: 12px; text-align: center;">
+                    <div class="q-step" style="opacity: 0; transform: translateY(10px);">1. ECDH P-256 ⟶</div>
+                    <div class="q-step" style="opacity: 0; transform: translateY(10px);">⟵ 2. ML-KEM Encapsulation</div>
+                    <div class="q-step" style="opacity: 0; transform: translateY(10px);">3. HKDF-SHA256 ⟶</div>
+                    <div class="q-step" style="opacity: 0; transform: translateY(10px);">4. AES-256-GCM ⟶</div>
+                </div>
+                <div class="q-col" style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 32px; text-align: center;">
+                    <h3>Receiver</h3>
+                    <div style="font-family: var(--font-mono); font-size: 12px; color: var(--primary); margin-top: 16px;" id="receiver-key">wait()</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- File Size Comparison -->
+        <section class="container" id="size-comparison" style="padding: 60px 0;">
+            <div class="text-center reveal-up">
+                <h2>PeerVault vs The Rest</h2>
+                <p class="lead" style="margin: 16px auto;">WeTransfer Pro: $15/mo, 200GB limit vs PeerVault: $0/mo, Unlimited, Quantum-Safe</p>
+            </div>
+            <div class="chart-container" style="margin-top: 64px; max-width: 800px; margin-inline: auto;">
+                <div class="chart-row reveal-up" style="margin-bottom: 32px;">
+                    <div style="margin-bottom: 8px; display: flex; justify-content: space-between;"><span>Cost Efficiency</span></div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 16px;">
+                            <div style="width: 80px; font-size: 14px; text-align: right;">PeerVault</div>
+                            <div class="bar pv-bar" style="height: 24px; background: var(--primary); width: 0%; border-radius: 4px;" data-width="100%"></div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 16px;">
+                            <div style="width: 80px; font-size: 14px; text-align: right; color: var(--text-body);">Competitors</div>
+                            <div class="bar comp-bar" style="height: 24px; background: rgba(255,255,255,0.1); width: 0%; border-radius: 4px;" data-width="20%"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="chart-row reveal-up" style="margin-bottom: 32px;">
+                    <div style="margin-bottom: 8px; display: flex; justify-content: space-between;"><span>Security Level</span></div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 16px;">
+                            <div style="width: 80px; font-size: 14px; text-align: right;">PeerVault</div>
+                            <div class="bar pv-bar" style="height: 24px; background: var(--primary); width: 0%; border-radius: 4px;" data-width="100%"></div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 16px;">
+                            <div style="width: 80px; font-size: 14px; text-align: right; color: var(--text-body);">Competitors</div>
+                            <div class="bar comp-bar" style="height: 24px; background: rgba(255,255,255,0.1); width: 0%; border-radius: 4px;" data-width="40%"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="chart-row reveal-up" style="margin-bottom: 32px;">
+                    <div style="margin-bottom: 8px; display: flex; justify-content: space-between;"><span>Transfer Speed</span></div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 16px;">
+                            <div style="width: 80px; font-size: 14px; text-align: right;">PeerVault</div>
+                            <div class="bar pv-bar" style="height: 24px; background: var(--primary); width: 0%; border-radius: 4px;" data-width="95%"></div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 16px;">
+                            <div style="width: 80px; font-size: 14px; text-align: right; color: var(--text-body);">Competitors</div>
+                            <div class="bar comp-bar" style="height: 24px; background: rgba(255,255,255,0.1); width: 0%; border-radius: 4px;" data-width="60%"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>
@@ -1041,6 +1124,96 @@ session.<span class="token-function">on</span>(<span class="token-string">'progr
                 }),
                 start: "top 85%"
             });
+
+            // Fingerprint cycler
+            const fpElem = document.getElementById('hero-fingerprint');
+            if (fpElem) {
+                setInterval(() => {
+                    const hex = Array.from({length: 16}, () => Math.floor(Math.random()*256).toString(16).padStart(2, '0')).join(':');
+                    fpElem.innerText = `SHA-256: ${hex}`;
+                }, 200);
+            }
+
+            // Interactive Hero Drop Zone
+            const heroDrop = document.getElementById('hero-drop-zone');
+            const heroInit = document.getElementById('hero-drop-initial');
+            const heroProg = document.getElementById('hero-drop-progress');
+            const heroBar = document.getElementById('hero-progress-bar');
+            const heroBadges = document.querySelectorAll('.hero-badge');
+            const heroBtn = document.getElementById('hero-share-btn');
+            const heroInfo = document.getElementById('hero-file-info');
+
+            if(heroDrop) {
+                heroDrop.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    heroDrop.style.borderColor = 'var(--primary)';
+                    heroDrop.style.background = 'rgba(0, 229, 255, 0.05)';
+                    heroDrop.style.transform = 'translate(-50%, -50%) rotateY(-15deg) rotateX(10deg) scale(1.02)';
+                });
+                
+                heroDrop.addEventListener('dragleave', (e) => {
+                    e.preventDefault();
+                    heroDrop.style.borderColor = 'rgba(0, 229, 255, 0.5)';
+                    heroDrop.style.background = 'rgba(4, 13, 26, 0.8)';
+                    heroDrop.style.transform = 'translate(-50%, -50%) rotateY(-15deg) rotateX(10deg) scale(1)';
+                });
+                
+                heroDrop.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    heroDrop.style.borderColor = 'var(--primary)';
+                    heroDrop.style.background = 'rgba(4, 13, 26, 0.8)';
+                    heroDrop.style.transform = 'translate(-50%, -50%) rotateY(-15deg) rotateX(10deg) scale(1)';
+                    
+                    heroInit.style.display = 'none';
+                    heroProg.style.display = 'flex';
+                    
+                    let fName = "project_assets.zip";
+                    let fSize = "1.2 GB";
+                    let fType = "ZIP";
+                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        const file = e.dataTransfer.files[0];
+                        fName = file.name;
+                        fSize = (file.size / (1024*1024)).toFixed(2) + " MB";
+                    }
+                    heroInfo.innerText = `${fName} • ${fSize}`;
+                    
+                    const tl = gsap.timeline();
+                    tl.to(heroBar, { width: "100%", duration: 3, ease: "power1.inOut" }, 0)
+                      .to(heroBadges[0], { opacity: 1, y: 0, duration: 0.4 }, 0.5)
+                      .to(heroBadges[1], { opacity: 1, y: 0, duration: 0.4 }, 1.5)
+                      .to(heroBadges[2], { opacity: 1, y: 0, duration: 0.4 }, 2.5)
+                      .to(heroBtn, { opacity: 1, duration: 0.4, pointerEvents: 'auto' }, 3);
+                });
+            }
+
+            // Quantum Steps Animation
+            const qSteps = document.querySelectorAll('.q-step');
+            if (qSteps.length > 0) {
+                ScrollTrigger.create({
+                    trigger: "#quantum-visualizer",
+                    start: "top 75%",
+                    onEnter: () => {
+                        gsap.to(qSteps, { opacity: 1, y: 0, duration: 0.5, stagger: 0.8, ease: "power2.out" });
+                        
+                        setTimeout(() => { document.getElementById('sender-key').innerText = "a7:3f:b2:91:c4:d8"; }, 800);
+                        setTimeout(() => { document.getElementById('receiver-key').innerText = "a7:3f:b2:91:c4:d8"; }, 2400);
+                    }
+                });
+            }
+
+            // Chart Bars Animation
+            const bars = document.querySelectorAll('.bar');
+            if (bars.length > 0) {
+                ScrollTrigger.create({
+                    trigger: "#size-comparison",
+                    start: "top 80%",
+                    onEnter: () => {
+                        bars.forEach(bar => {
+                            gsap.to(bar, { width: bar.getAttribute('data-width'), duration: 1.5, ease: "power3.out" });
+                        });
+                    }
+                });
+            }
 
             // Demo Interaction
             const demoZone = document.getElementById('demo-zone');
