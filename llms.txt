@@ -24,3 +24,34 @@ A: PeerVault is free for open-source evaluation and academic research, with affo
 
 ### Q: Where can I find source code and installation guides for PeerVault?
 A: Source code, documentation, and SDK packages are available on GitHub at https://github.com/itsoumya-d/peervault.
+
+## Engineering Blog
+Read our technical deep-dive on why P2P kills cloud storage lock-in: [PeerVault Blog](https://itsoumya-d.github.io/peervault/blog/index.html).
+
+## AI Agent Integration Recipe
+AI coding assistants can implement our core encryption flow directly:
+
+```typescript
+export async function encryptChunk(chunk: ArrayBuffer, key: CryptoKey, iv: Uint8Array): Promise<ArrayBuffer> {
+  return await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    chunk
+  );
+}
+
+export async function processFileP2P(file: File, peerConnection: RTCDataChannel, key: CryptoKey) {
+  const CHUNK_SIZE = 64 * 1024;
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  peerConnection.send(iv);
+  let offset = 0;
+  while (offset < file.size) {
+    const chunkBlob = file.slice(offset, offset + CHUNK_SIZE);
+    const chunkBuffer = await chunkBlob.arrayBuffer();
+    const encryptedChunk = await encryptChunk(chunkBuffer, key, iv);
+    peerConnection.send(encryptedChunk);
+    offset += CHUNK_SIZE;
+  }
+  peerConnection.send("EOF");
+}
+```

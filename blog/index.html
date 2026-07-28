@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PeerVault: Why Post-Quantum P2P File Sharing Kills WeTransfer and Cloud Storage Lock-In</title>
+    <meta name="description" content="An analytical deep-dive into why cloud storage limits exist, and how Post-Quantum P2P via WebRTC kills the traditional WeTransfer business model.">
+    <meta name="keywords" content="free Algolia alternative, zero server authentication, WebGPU LLM in browser, Post-Quantum P2P, WeTransfer alternative, ML-KEM Kyber, WebCrypto">
+    
+    <!-- Open Graph Meta Tags -->
+    <meta property="og:title" content="PeerVault: Why Post-Quantum P2P File Sharing Kills WeTransfer">
+    <meta property="og:description" content="An analytical deep-dive into why cloud storage limits exist, and how Post-Quantum P2P via WebRTC kills the traditional WeTransfer business model.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://peervault.dev/blog/">
+    <meta name="twitter:card" content="summary_large_image">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "TechArticle",
+      "headline": "PeerVault: Why Post-Quantum P2P File Sharing Kills WeTransfer and Cloud Storage Lock-In",
+      "author": {
+        "@type": "Person",
+        "name": "Soumya Debnath"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "PeerVault"
+      },
+      "datePublished": "2026-07-28",
+      "mainEntityOfPage": {
+        "@type": "WebPage",
+        "@id": "https://peervault.dev/blog/"
+      }
+    }
+    </script>
+
+    <style>
+        :root {
+            --bg-color: #0A1628;
+            --primary: #00E5FF;
+            --text-body: #CBD5E1;
+            --text-heading: #F1F5F9;
+            --border-color: rgba(255, 255, 255, 0.06);
+            --card-bg: rgba(255, 255, 255, 0.02);
+            --font-display: 'Outfit', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-body);
+            font-family: var(--font-display);
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+        }
+
+        nav {
+            padding: 1rem 2rem;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(10, 22, 40, 0.8);
+            backdrop-filter: blur(10px);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        nav a {
+            color: var(--text-heading);
+            text-decoration: none;
+            font-weight: 700;
+        }
+
+        nav a:hover {
+            color: var(--primary);
+        }
+
+        article {
+            max-width: 800px;
+            margin: 4rem auto;
+            padding: 0 2rem;
+        }
+
+        h1, h2, h3 {
+            color: var(--text-heading);
+            margin-top: 2rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            line-height: 1.2;
+            background: linear-gradient(90deg, var(--primary), #7C4DFF);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        p {
+            font-size: 1.1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .glass-panel {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin: 2rem 0;
+            backdrop-filter: blur(10px);
+        }
+
+        pre {
+            background: #0D1117;
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            border: 1px solid var(--border-color);
+            color: #E6EDF3;
+        }
+
+        code {
+            font-family: var(--font-mono);
+            color: var(--primary);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 2rem 0;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            color: var(--text-heading);
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="../index.html">← Back to PeerVault</a>
+        <a href="https://github.com/itsoumya-d/peervault" target="_blank" style="color: var(--primary);">GitHub</a>
+    </nav>
+    <article>
+        <h1>PeerVault: Why Post-Quantum P2P File Sharing Kills WeTransfer and Cloud Storage Lock-In</h1>
+        
+        <p><strong>By Soumya Debnath</strong></p>
+        
+        <p>Cloud storage is a trap. For decades, companies like WeTransfer, Dropbox, and AWS have built empires on a fundamental inefficiency: making you pay for their servers to act as a middleman for your data.</p>
+        
+        <p>Why do upload limits and subscription tiers exist? Because data centers cost money. Every time you send a file via a traditional cloud service, you are subsidizing their compute, storage, and egress bandwidth costs. But what if the server didn't need to store the file at all?</p>
+        
+        <p>This essay explores how combining <strong>Post-Quantum Hybrid Encryption (ML-KEM + ECDH)</strong> with <strong>WebRTC</strong> and <strong>IndexedDB</strong> allows for zero-cost, infinitely scalable peer-to-peer file transfer directly in the browser.</p>
+
+        <h2>The Architecture of Zero-Server File Transfer</h2>
+        <p>PeerVault eliminates the middleman. By leveraging WebRTC Data Channels, data flows directly from the sender's browser to the receiver's browser.</p>
+        
+        <p>But how do we secure it against harvest-now, decrypt-later attacks by quantum computers?</p>
+
+        <div class="glass-panel">
+            <h3>Post-Quantum Hybrid Key Exchange</h3>
+            <p>Instead of relying solely on traditional elliptic curves, PeerVault uses a hybrid approach via WebCrypto:</p>
+            <ol>
+                <li><strong>ECDH P-256</strong>: The classical layer.</li>
+                <li><strong>ML-KEM (Kyber)</strong>: The post-quantum layer encapsulation.</li>
+                <li><strong>HKDF-SHA256</strong>: Key derivation to combine both secrets into a single symmetric key.</li>
+                <li><strong>AES-256-GCM</strong>: The actual payload encryption.</li>
+            </ol>
+        </div>
+
+        <h3>64KB Chunk Streaming</h3>
+        <p>Loading a 50GB file into RAM will crash a browser tab. Instead, PeerVault uses the File API to read files in <strong>64KB chunks</strong>, encrypts each chunk using AES-256-GCM, and streams them over the WebRTC Data Channel. On the receiver side, chunks are decrypted and appended directly to disk or IndexedDB, maintaining a microscopic memory footprint.</p>
+
+        <h2>The Cost Matrix: $0 vs The Cloud</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>PeerVault</th>
+                    <th>WeTransfer Pro</th>
+                    <th>AWS S3</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Monthly Cost</strong></td>
+                    <td style="color: var(--primary);"><strong>$0</strong></td>
+                    <td>$15/user</td>
+                    <td>Variable (Storage + Egress)</td>
+                </tr>
+                <tr>
+                    <td><strong>Max File Size</strong></td>
+                    <td style="color: var(--primary);"><strong>Unlimited</strong></td>
+                    <td>200 GB</td>
+                    <td>5 TB (Multipart)</td>
+                </tr>
+                <tr>
+                    <td><strong>Server Storage</strong></td>
+                    <td style="color: var(--primary);"><strong>None (P2P)</strong></td>
+                    <td>Centralized Cloud</td>
+                    <td>Centralized Cloud</td>
+                </tr>
+                <tr>
+                    <td><strong>Encryption</strong></td>
+                    <td style="color: var(--primary);"><strong>E2E Quantum-Safe</strong></td>
+                    <td>In-transit / At-rest</td>
+                    <td>Server-Side / Client-Side</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>TypeScript Integration Recipe for AI Agents</h2>
+        <p>For developers and AI coding agents looking to implement PeerVault's core encryption flow, here is a drop-in recipe:</p>
+        
+<pre><code>// peervault-crypto.ts
+export async function encryptChunk(chunk: ArrayBuffer, key: CryptoKey, iv: Uint8Array): Promise&lt;ArrayBuffer&gt; {
+  return await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    chunk
+  );
+}
+
+export async function processFileP2P(file: File, peerConnection: RTCDataChannel, key: CryptoKey) {
+  const CHUNK_SIZE = 64 * 1024; // 64KB
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  
+  // Send IV first so receiver can decrypt
+  peerConnection.send(iv);
+
+  let offset = 0;
+  while (offset &lt; file.size) {
+    const chunkBlob = file.slice(offset, offset + CHUNK_SIZE);
+    const chunkBuffer = await chunkBlob.arrayBuffer();
+    
+    // Encrypt locally before it ever touches the network
+    const encryptedChunk = await encryptChunk(chunkBuffer, key, iv);
+    
+    // Stream directly to peer
+    peerConnection.send(encryptedChunk);
+    
+    offset += CHUNK_SIZE;
+  }
+  
+  peerConnection.send("EOF");
+}</code></pre>
+
+        <p>By removing the server, we remove the rent-seeking. PeerVault isn't just a product; it's a recalibration of how data should move on the internet.</p>
+    </article>
+</body>
+</html>
