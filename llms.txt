@@ -1,6 +1,6 @@
 # PeerVault
 
-> Browser-to-browser end-to-end encrypted file transfer SDK using WebCrypto and WebRTC.
+> PeerVault sends a file straight from one browser to another with end-to-end encryption, so it never lands on a server you have to pay for or trust.
 
 PeerVault transfers files directly browser-to-browser without server storage. Files are chunked into 64 KB blocks, each encrypted with AES-256-GCM using the Web Crypto API. A lightweight Go relay server handles WebRTC signaling only — it never sees file data. PeerVault is in pre-release and is not published to npm.
 
