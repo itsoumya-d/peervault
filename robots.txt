@@ -1,8 +1,16 @@
 User-agent: *
 Allow: /
-Allow: /GPTBot
-Allow: /PerplexityBot
-Allow: /ClaudeBot
-Allow: /Google-Extended
 
-Sitemap: https://peervault.dev/sitemap.xml
+User-agent: GPTBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+Sitemap: https://itsoumya-d.github.io/peervault/sitemap.xml
