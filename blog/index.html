@@ -3,15 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PeerVault: Why Post-Quantum P2P File Sharing Kills WeTransfer and Cloud Storage Lock-In</title>
-    <meta name="description" content="An analytical deep-dive into why cloud storage limits exist, and how Post-Quantum P2P via WebRTC kills the traditional WeTransfer business model.">
-    <meta name="keywords" content="free Algolia alternative, zero server authentication, WebGPU LLM in browser, Post-Quantum P2P, WeTransfer alternative, ML-KEM Kyber, WebCrypto">
+    <title>PeerVault: Zero-Server P2P File Transfer and the Cost of Cloud Storage Lock-In</title>
+    <meta name="description" content="An analytical deep-dive into why cloud storage limits exist, and how zero-server P2P via WebRTC undercuts the traditional WeTransfer business model.">
+    <meta name="keywords" content="WeTransfer alternative, peer-to-peer file transfer, browser to browser file transfer, WebRTC DataChannel, end-to-end encryption, AES-256-GCM, WebCrypto, zero server file sharing">
     
     <!-- Open Graph Meta Tags -->
-    <meta property="og:title" content="PeerVault: Why Post-Quantum P2P File Sharing Kills WeTransfer">
-    <meta property="og:description" content="An analytical deep-dive into why cloud storage limits exist, and how Post-Quantum P2P via WebRTC kills the traditional WeTransfer business model.">
+    <meta property="og:title" content="PeerVault: Zero-Server P2P File Transfer and the Cost of Cloud Storage Lock-In">
+    <meta property="og:description" content="An analytical deep-dive into why cloud storage limits exist, and how zero-server P2P via WebRTC undercuts the traditional WeTransfer business model.">
     <meta property="og:type" content="article">
-    <meta property="og:url" content="https://peervault.dev/blog/">
+    <meta property="og:url" content="https://itsoumya-d.github.io/peervault/blog/index.html">
+    <link rel="canonical" href="https://itsoumya-d.github.io/peervault/blog/index.html">
     <meta name="twitter:card" content="summary_large_image">
 
     <!-- Fonts -->
@@ -24,7 +25,7 @@
     {
       "@context": "https://schema.org",
       "@type": "TechArticle",
-      "headline": "PeerVault: Why Post-Quantum P2P File Sharing Kills WeTransfer and Cloud Storage Lock-In",
+      "headline": "PeerVault: Zero-Server P2P File Transfer and the Cost of Cloud Storage Lock-In",
       "author": {
         "@type": "Person",
         "name": "Soumya Debnath"
@@ -36,7 +37,7 @@
       "datePublished": "2026-07-28",
       "mainEntityOfPage": {
         "@type": "WebPage",
-        "@id": "https://peervault.dev/blog/"
+        "@id": "https://itsoumya-d.github.io/peervault/blog/index.html"
       }
     }
     </script>
@@ -155,7 +156,7 @@
         <a href="https://github.com/itsoumya-d/peervault" target="_blank" style="color: var(--primary);">GitHub</a>
     </nav>
     <article>
-        <h1>PeerVault: Why Post-Quantum P2P File Sharing Kills WeTransfer and Cloud Storage Lock-In</h1>
+        <h1>PeerVault: Zero-Server P2P File Transfer and the Cost of Cloud Storage Lock-In</h1>
         
         <p><strong>By Soumya Debnath</strong></p>
         
@@ -163,26 +164,27 @@
         
         <p>Why do upload limits and subscription tiers exist? Because data centers cost money. Every time you send a file via a traditional cloud service, you are subsidizing their compute, storage, and egress bandwidth costs. But what if the server didn't need to store the file at all?</p>
         
-        <p>This essay explores how combining <strong>Post-Quantum Hybrid Encryption (ML-KEM + ECDH)</strong> with <strong>WebRTC</strong> and <strong>IndexedDB</strong> allows for zero-cost, infinitely scalable peer-to-peer file transfer directly in the browser.</p>
+        <p>This essay explores how combining <strong>WebCrypto AES-256-GCM</strong> with <strong>WebRTC DataChannels</strong> allows for zero-server peer-to-peer file transfer directly in the browser. A correction to an earlier version of this article: PeerVault does <strong>not</strong> implement post-quantum cryptography, and it does not use IndexedDB. The sections below describe what the code actually does.</p>
 
         <h2>The Architecture of Zero-Server File Transfer</h2>
         <p>PeerVault eliminates the middleman. By leveraging WebRTC Data Channels, data flows directly from the sender's browser to the receiver's browser.</p>
         
-        <p>But how do we secure it against harvest-now, decrypt-later attacks by quantum computers?</p>
+        <p>So how is the payload secured, and what is the honest limit of that protection?</p>
 
         <div class="glass-panel">
-            <h3>Post-Quantum Hybrid Key Exchange</h3>
-            <p>Instead of relying solely on traditional elliptic curves, PeerVault uses a hybrid approach via WebCrypto:</p>
+            <h3>Key Handling (What the Code Actually Does)</h3>
+            <p>PeerVault uses only classical, standardised WebCrypto primitives:</p>
             <ol>
-                <li><strong>ECDH P-256</strong>: The classical layer.</li>
-                <li><strong>ML-KEM (Kyber)</strong>: The post-quantum layer encapsulation.</li>
-                <li><strong>HKDF-SHA256</strong>: Key derivation to combine both secrets into a single symmetric key.</li>
-                <li><strong>AES-256-GCM</strong>: The actual payload encryption.</li>
+                <li><strong>AES-256-GCM</strong>: the payload encryption. The sender generates a random 256-bit key and places it in the share link's URL fragment, which browsers never transmit to a server.</li>
+                <li><strong>A fresh 96-bit IV per chunk</strong>: generated with <code>crypto.getRandomValues</code>. Reusing one IV across chunks under a single AES-GCM key would be catastrophic.</li>
+                <li><strong>The GCM authentication tag</strong>: detects tampering with any chunk payload.</li>
+                <li><strong>P-256 ECDH + HKDF-SHA-256</strong>: available in the SDK as <code>PQCrypto</code>, but not used by the default share-link transfer path.</li>
+                <li><strong>No ML-KEM / Kyber</strong>: there is no lattice implementation in this codebase. The transfer is not post-quantum secure and does not address harvest-now-decrypt-later.</li>
             </ol>
         </div>
 
         <h3>64KB Chunk Streaming</h3>
-        <p>Loading a 50GB file into RAM will crash a browser tab. Instead, PeerVault uses the File API to read files in <strong>64KB chunks</strong>, encrypts each chunk using AES-256-GCM, and streams them over the WebRTC Data Channel. On the receiver side, chunks are decrypted and appended directly to disk or IndexedDB, maintaining a microscopic memory footprint.</p>
+        <p>Loading a very large file into RAM will crash a browser tab. On the <em>send</em> side PeerVault avoids this: it uses the File API to read files in <strong>64KB chunks</strong>, encrypts each chunk using AES-256-GCM with its own IV, and streams them over the WebRTC Data Channel, so the sender never holds the whole file. On the receiver side, chunks are decrypted and held in memory, then assembled into a <code>Blob</code>. This is a real limitation rather than a strength: measured peak memory is roughly 1.5&times; the file size, so multi-gigabyte transfers are bounded by device RAM. Streaming to disk (File System Access API or IndexedDB) is not implemented.</p>
 
         <h2>The Cost Matrix: $0 vs The Cloud</h2>
         <table>
@@ -203,7 +205,7 @@
                 </tr>
                 <tr>
                     <td><strong>Max File Size</strong></td>
-                    <td style="color: var(--primary);"><strong>Unlimited</strong></td>
+                    <td style="color: var(--primary);"><strong>Bounded by receiver RAM</strong></td>
                     <td>200 GB</td>
                     <td>5 TB (Multipart)</td>
                 </tr>
@@ -215,7 +217,7 @@
                 </tr>
                 <tr>
                     <td><strong>Encryption</strong></td>
-                    <td style="color: var(--primary);"><strong>E2E Quantum-Safe</strong></td>
+                    <td style="color: var(--primary);"><strong>E2E AES-256-GCM (classical)</strong></td>
                     <td>In-transit / At-rest</td>
                     <td>Server-Side / Client-Side</td>
                 </tr>
@@ -226,36 +228,42 @@
         <p>For developers and AI coding agents looking to implement PeerVault's core encryption flow, here is a drop-in recipe:</p>
         
 <pre><code>// peervault-crypto.ts
-export async function encryptChunk(chunk: ArrayBuffer, key: CryptoKey, iv: Uint8Array): Promise&lt;ArrayBuffer&gt; {
-  return await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    key,
-    chunk
-  );
+// A fresh IV MUST be generated for every chunk. Reusing one IV across chunks
+// under the same AES-GCM key leaks the XOR of the plaintexts and destroys
+// integrity, so the IV is generated inside the loop and sent with each chunk.
+export async function encryptChunk(chunk: ArrayBuffer, key: CryptoKey) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, chunk);
+  return { iv, ciphertext };
 }
 
-export async function processFileP2P(file: File, peerConnection: RTCDataChannel, key: CryptoKey) {
+export async function processFileP2P(file: File, channel: RTCDataChannel, key: CryptoKey) {
   const CHUNK_SIZE = 64 * 1024; // 64KB
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  
-  // Send IV first so receiver can decrypt
-  peerConnection.send(iv);
+  const totalChunks = file.size === 0 ? 1 : Math.ceil(file.size / CHUNK_SIZE);
+
+  channel.send(JSON.stringify({ type: "metadata", size: file.size, chunks: totalChunks }));
 
   let offset = 0;
-  while (offset &lt; file.size) {
-    const chunkBlob = file.slice(offset, offset + CHUNK_SIZE);
-    const chunkBuffer = await chunkBlob.arrayBuffer();
-    
-    // Encrypt locally before it ever touches the network
-    const encryptedChunk = await encryptChunk(chunkBuffer, key, iv);
-    
-    // Stream directly to peer
-    peerConnection.send(encryptedChunk);
-    
+  let chunkIndex = 0;
+  do {
+    const chunkBuffer = await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer();
+
+    // Encrypt locally before it ever touches the network.
+    const { iv, ciphertext } = await encryptChunk(chunkBuffer, key);
+
+    // Frame every chunk: [4B chunkIndex][12B IV][ciphertext]. Without an explicit
+    // index the receiver cannot detect a dropped or duplicated chunk.
+    const framed = new Uint8Array(4 + 12 + ciphertext.byteLength);
+    new DataView(framed.buffer).setUint32(0, chunkIndex, true);
+    framed.set(iv, 4);
+    framed.set(new Uint8Array(ciphertext), 16);
+    channel.send(framed);
+
     offset += CHUNK_SIZE;
-  }
-  
-  peerConnection.send("EOF");
+    chunkIndex++;
+  } while (offset < file.size);
+
+  channel.send(JSON.stringify({ type: "complete", chunks: totalChunks }));
 }</code></pre>
 
         <p>By removing the server, we remove the rent-seeking. PeerVault isn't just a product; it's a recalibration of how data should move on the internet.</p>

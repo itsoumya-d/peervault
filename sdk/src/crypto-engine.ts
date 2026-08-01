@@ -1,28 +1,46 @@
 // Copyright (c) 2024-2026 Soumya Debnath. All Rights Reserved.
 // Licensed under the Business Source License 1.1 (BSL 1.1).
 // See LICENSE file for details. Production use requires a paid license.
-// Contact: soumyadebnath1661@gmail.com | +91 7031648617
+// Contact: soumyadebnath1661@gmail.com
 
 import { PQCrypto, CryptoCapabilities } from './pq-crypto';
 
 export interface CryptoEngineOptions {
+  /**
+   * @deprecated No hybrid key exchange exists in PeerVault. This flag is retained
+   * for API compatibility and has no effect; key agreement is always classical
+   * P-256 ECDH, and the file-transfer path uses a random AES-256-GCM key carried in
+   * the share link fragment.
+   */
   useHybridKeyExchange?: boolean;
 }
 
 export class CryptoEngine {
   private key: CryptoKey | null = null;
   private localKeyPair: CryptoKeyPair | null = null;
-  public useHybridKeyExchange: boolean;
+  /**
+   * @deprecated Always false. Previously defaulted to `PQCrypto.isMLKEMSupported()`,
+   * which returned true in every modern browser and told applications that a hybrid
+   * post-quantum exchange was in use when none was implemented.
+   */
+  public readonly useHybridKeyExchange: boolean = false;
 
-  constructor(options?: CryptoEngineOptions) {
-    this.useHybridKeyExchange = options?.useHybridKeyExchange ?? PQCrypto.isMLKEMSupported();
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  constructor(_options?: CryptoEngineOptions) {
+    // useHybridKeyExchange is intentionally fixed at false; see the field docs.
   }
 
+  /**
+   * Reports what this engine actually does. `supportsMLKEM` describes the platform,
+   * not PeerVault: `usesPostQuantumKeyExchange` is always false.
+   */
   getCapabilities(): CryptoCapabilities {
+    const hasSubtle = typeof crypto !== 'undefined' && !!crypto.subtle;
     return {
       supportsMLKEM: PQCrypto.isMLKEMSupported(),
-      supportsECDH: typeof crypto !== 'undefined' && !!crypto.subtle,
-      supportsAESGCM: typeof crypto !== 'undefined' && !!crypto.subtle,
+      supportsECDH: hasSubtle,
+      supportsAESGCM: hasSubtle,
+      usesPostQuantumKeyExchange: false,
     };
   }
 
@@ -80,8 +98,14 @@ export class CryptoEngine {
   async decryptChunk(iv: Uint8Array, ciphertext: ArrayBuffer): Promise<ArrayBuffer> {
     if (!this.key) throw new Error('Key not initialized');
 
+    // Copy into an ArrayBuffer-backed view: an incoming Uint8Array may be typed as
+    // Uint8Array<ArrayBufferLike>, which is not assignable to BufferSource under
+    // `strict` and made `tsc --noEmit` fail on this file.
+    const ivBytes = new Uint8Array(iv.byteLength);
+    ivBytes.set(iv);
+
     return crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv },
+      { name: 'AES-GCM', iv: ivBytes },
       this.key,
       ciphertext
     );

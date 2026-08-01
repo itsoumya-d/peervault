@@ -6,13 +6,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PeerVault - E2E Encrypted P2P File Transfer</title>
-    <meta name="description" content="PeerVault is the best free WeTransfer alternative for E2E encrypted P2P file transfers. Transfer unlimited files directly with zero cloud storage.">
+    <meta name="description" content="PeerVault is the best free WeTransfer alternative for E2E encrypted P2P file transfers. Transfer files directly browser-to-browser with zero cloud storage.">
     
     <!-- Open Graph Meta Tags -->
     <meta property="og:title" content="PeerVault - E2E Encrypted P2P File Transfer">
     <meta property="og:description" content="Transfer files directly between browsers. No cloud. No trace. AES-256-GCM encrypted.">
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://peervault.dev">
+    <meta property="og:url" content="https://itsoumya-d.github.io/peervault/">
+    <link rel="canonical" href="https://itsoumya-d.github.io/peervault/">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="PeerVault - Free WeTransfer Alternative">
     <meta name="twitter:description" content="Secure, fast, peer-to-peer file transfer. 100% E2E encrypted.">
@@ -738,8 +739,8 @@
                             </div>
                             <div id="hero-badges" style="display: flex; flex-direction: column; gap: 4px; font-family: var(--font-mono); font-size: 11px; width: 100%;">
                                 <div class="hero-badge" style="opacity: 0; transform: translateY(10px);">🔒 AES-256-GCM</div>
-                                <div class="hero-badge" style="opacity: 0; transform: translateY(10px);">🛡️ ML-KEM Hybrid</div>
-                                <div class="hero-badge" style="opacity: 0; transform: translateY(10px);">✅ Quantum-Safe</div>
+                                <div class="hero-badge" style="opacity: 0; transform: translateY(10px);">🔑 P-256 ECDH + HKDF</div>
+                                <div class="hero-badge" style="opacity: 0; transform: translateY(10px);">🌐 Direct WebRTC DataChannel</div>
                             </div>
                             <button id="hero-share-btn" class="btn btn-primary" style="opacity: 0; margin-top: 8px; font-size: 12px; height: 32px; padding: 0 16px; pointer-events: none;">Share Link</button>
                         </div>
@@ -766,11 +767,11 @@
             </div>
         </section>
 
-        <!-- Post-Quantum Visualizer -->
+        <!-- Key Exchange Visualizer -->
         <section class="container" id="quantum-visualizer" style="padding: 120px 0;">
             <div class="text-center reveal-up">
-                <h2>Post-Quantum Hybrid Encryption</h2>
-                <p class="lead" style="margin: 16px auto;">Future-proof your data against quantum attacks.</p>
+                <h2>Classical End-to-End Encryption</h2>
+                <p class="lead" style="margin: 16px auto;">AES-256-GCM via the Web Crypto API. PeerVault does <strong>not</strong> implement post-quantum cryptography &mdash; see the README for exactly what the code does.</p>
             </div>
             <div class="quantum-grid reveal-up" style="display: grid; grid-template-columns: 1fr auto 1fr; gap: 32px; align-items: center; margin-top: 64px;">
                 <div class="q-col" style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 32px; text-align: center;">
@@ -778,9 +779,9 @@
                     <div style="font-family: var(--font-mono); font-size: 12px; color: var(--primary); margin-top: 16px;" id="sender-key">gen_key()</div>
                 </div>
                 <div class="q-arrows" style="display: flex; flex-direction: column; gap: 24px; font-family: var(--font-mono); font-size: 12px; text-align: center;">
-                    <div class="q-step" style="opacity: 0; transform: translateY(10px);">1. ECDH P-256 ⟶</div>
-                    <div class="q-step" style="opacity: 0; transform: translateY(10px);">⟵ 2. ML-KEM Encapsulation</div>
-                    <div class="q-step" style="opacity: 0; transform: translateY(10px);">3. HKDF-SHA256 ⟶</div>
+                    <div class="q-step" style="opacity: 0; transform: translateY(10px);">1. Generate AES-256-GCM key ⟶</div>
+                    <div class="q-step" style="opacity: 0; transform: translateY(10px);">⟵ 2. Key travels in the URL fragment</div>
+                    <div class="q-step" style="opacity: 0; transform: translateY(10px);">3. Fresh 96-bit IV per chunk ⟶</div>
                     <div class="q-step" style="opacity: 0; transform: translateY(10px);">4. AES-256-GCM ⟶</div>
                 </div>
                 <div class="q-col" style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 32px; text-align: center;">
@@ -794,7 +795,7 @@
         <section class="container" id="size-comparison" style="padding: 60px 0;">
             <div class="text-center reveal-up">
                 <h2>PeerVault vs The Rest</h2>
-                <p class="lead" style="margin: 16px auto;">WeTransfer Pro: $15/mo, 200GB limit vs PeerVault: $0/mo, Unlimited, Quantum-Safe</p>
+                <p class="lead" style="margin: 16px auto;">WeTransfer Pro: $15/mo, 200 GB limit vs PeerVault: $0/mo, no server storage. File size is bounded by receiver RAM, not by a quota.</p>
             </div>
             <div class="chart-container" style="margin-top: 64px; max-width: 800px; margin-inline: auto;">
                 <div class="chart-row reveal-up" style="margin-bottom: 32px;">
@@ -953,13 +954,13 @@ session.<span class="token-function">on</span>(<span class="token-string">'progr
                 </div>
                 <div class="feature-card reveal-up">
                     <div class="feature-icon">⚡</div>
-                    <h3>Unlimited Size</h3>
-                    <p style="margin-top: 12px;">No 2GB artificial limits. Transfer 100GB files easily over direct local connections.</p>
+                    <h3>No Quota</h3>
+                    <p style="margin-top: 12px;">No artificial upload tier. The receiver assembles the file in a Blob in memory, so the practical ceiling is available RAM (measured: roughly 1.5&times; the file size), not a plan limit.</p>
                 </div>
                 <div class="feature-card reveal-up">
                     <div class="feature-icon">⏸️</div>
-                    <h3>Resumable</h3>
-                    <p style="margin-top: 12px;">Network dropped? Transfers automatically resume exactly where they left off.</p>
+                    <h3>Ordered &amp; Reliable</h3>
+                    <p style="margin-top: 12px;">Chunks stream over an ordered, reliable WebRTC DataChannel. Note: transfers are <strong>not</strong> resumable &mdash; if either tab closes, the transfer must be restarted.</p>
                 </div>
                 <div class="feature-card reveal-up">
                     <div class="feature-icon">🗑️</div>
