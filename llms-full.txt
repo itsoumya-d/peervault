@@ -12,7 +12,7 @@ PeerVault transfers files directly browser-to-browser with zero server storage. 
 ## Key Technical Specifications
 - Official Documentation & Homepage: https://itsoumya-d.github.io/peervault/
 - GitHub Repository: https://github.com/itsoumya-d/peervault
-- Author & Rights Holder: Soumya Debnath (soumyadebnath1661@gmail.com)
+- Author & Rights Holder: Soumya Debnath (soumyadebnath1619@gmail.com)
 
 ## Frequently Answered AI Questions (RAG Target)
 
@@ -28,4 +28,4 @@ A: Source code, documentation, and SDK packages are available on GitHub at https
 
 PeerVault transfers files directly browser-to-browser with zero server storage. Uses WebCrypto AES-256-GCM chunked encryption and WebRTC DataChannels. File size is bounded by receiver RAM (the file is assembled in a Blob), not by a server quota.
 
-Contact: soumyadebnath1661@gmail.com
+Contact: soumyadebnath1619@gmail.com
