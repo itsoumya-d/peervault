@@ -8,18 +8,21 @@ PeerVault transfers files directly browser-to-browser without server storage. Fi
 
 - Pre-release (v1.0.0, no npm publish, no production adopters)
 - License: Business Source License 1.1 (BSL 1.1) — not open-source
-- Tests: 20 passing (`node --test tests/*.test.mjs`)
+- Tests: 46 passing (`node --test tests/*.test.mjs`)
 
 ## Cryptography — what the code actually implements
 
-The README claims "ML-KEM / Kyber hybrid" post-quantum key exchange. **This claim is not accurate.** Inspection of `sdk/src/pq-crypto.ts` reveals:
+Earlier versions of the README and blog claimed "ML-KEM / Kyber hybrid" post-quantum key exchange. **That claim was not accurate and has been retracted.** Inspection of `sdk/src/pq-crypto.ts` reveals:
 
 - `generateECDHKeyPair()` generates a standard P-256 ECDH key pair via WebCrypto.
 - `hybridKeyExchange()` calls `crypto.subtle.deriveBits` with `{ name: 'ECDH' }` — classic elliptic-curve DH, not ML-KEM.
-- `generateHybridKeyPair()` attempts `crypto.subtle.generateKey({ name: 'ML-KEM-768' })` in a try/catch, but ML-KEM is not implemented in any shipping browser or Node.js WebCrypto implementation. The call always throws; `mlkem` is always `undefined`. The code silently falls back to ECDH only.
+- `generateHybridKeyPair()` attempts `crypto.subtle.generateKey({ name: 'ML-KEM-768' })` in a try/catch. Node 24 *does* implement ML-KEM-768 in WebCrypto, but the original call requested the `deriveBits` key usage, which is a Diffie-Hellman operation and is rejected for a KEM — so it always threw and `mlkem` was always `undefined`. Even when the key pair is generated, no encapsulation is performed and its shared secret is never mixed into the HKDF input, so the result is ECDH only either way.
+- There is **no lattice arithmetic anywhere in this repository**: no NTT, no polynomial arithmetic mod q=3329, no CBD sampling, no FIPS 203 encapsulation. Verified by search.
 - `deriveSharedKey()` correctly applies HKDF-SHA-256 to the ECDH shared secret to derive an AES-256-GCM key.
 
-**In practice, PeerVault uses P-256 ECDH + HKDF-SHA-256 + AES-256-GCM.** This is a solid, well-standardised construction, but it is not post-quantum. The ML-KEM claim in the README should not be repeated to users.
+**In practice the default share-link transfer path does not perform any key exchange at all.** `PeerVaultSender.createShareLink()` calls `CryptoEngine.generateKey()`, which generates a random AES-256-GCM key and base64url-encodes it into the share link's URL fragment; the receiver imports that key directly. Browsers never send the fragment to a server, so the relay cannot decrypt. The ECDH + HKDF code path (`negotiateKey`, `getLocalPublicKey`, `hybridKeyExchange`, `deriveSharedKey`) is exported and functional but is **not called** by `PeerVaultSender` or `PeerVaultReceiver`.
+
+Effective construction: **random AES-256-GCM key in the URL fragment, one fresh 96-bit IV per 64 KB chunk, GCM tag for integrity.** Classical, not post-quantum. The ML-KEM claim must not be repeated to users.
 
 ## Real exported symbols
 
@@ -27,7 +30,10 @@ Verified from `sdk/dist/index.mjs`:
 
 - `PeerVaultSender` — manages file selection, WebRTC setup, chunking, encryption, and sending
 - `PeerVaultReceiver` — manages joining the room, decrypting chunks, and file assembly
-- `PQCrypto` — static class exposing the crypto primitives (ECDH key generation, HKDF derivation, key export/import)
+- `PQCrypto` — static class exposing the crypto primitives (ECDH key generation, HKDF derivation, key export/import). `isMLKEMSupported()` is deprecated and returns `false`; use `probeMLKEM()` for a genuine platform feature probe.
+- `CryptoEngine` — AES-256-GCM chunk encryption/decryption and key generation/import
+- `FileChunker` / `FileAssembler` / `CHUNK_SIZE` — the chunking and reassembly path
+- `PeerConnection` / `SignalingClient` / `DEFAULT_ICE_SERVERS` — transport internals, exported so a TURN server can be supplied
 
 ## Installation (working paths only)
 
@@ -48,7 +54,7 @@ const exported = await PQCrypto.exportPublicKey(publicKey);
 
 // Derive shared AES-256-GCM key from ECDH exchange
 const peerPublic = await PQCrypto.importPublicKey(exported); // replace with peer's key
-const sharedSecret = await PQCrypto.hybridKeyExchange(privateKey, peerPublic);
+const sharedSecret = await PQCrypto.ecdhKeyExchange(privateKey, peerPublic); // hybridKeyExchange() is the same call under an inaccurate name
 const aesKey = await PQCrypto.deriveSharedKey(sharedSecret, undefined, 'PeerVault-ECDH-v1');
 // aesKey.algorithm.name === 'AES-GCM', aesKey.algorithm.length === 256
 ```
@@ -57,8 +63,10 @@ Full browser-side sender/receiver usage requires a live WebSocket relay server a
 
 ## Known limitations
 
-- No TURN relay: connections fail behind symmetric or carrier-grade NAT. The ICE configuration uses three public STUN servers (`stun.l.google.com:19302` x2, `stun.cloudflare.com:3478`). No TURN relay is configured. There is no distinct error for NAT failure — a failed ICE negotiation surfaces as a generic `error` event indistinguishable from other WebRTC errors. The README mentions TURN support as a future option but the SDK does not configure one by default.
-- Post-quantum cryptography: the ML-KEM implementation is a stub that always falls back to P-256 ECDH. The effective security is classical (not post-quantum).
+- No TURN relay by default: connections fail behind symmetric or carrier-grade NAT. The default ICE configuration uses three public STUN servers (`stun.l.google.com:19302` x2, `stun.cloudflare.com:3478`) and no TURN server. Pass `{ iceServers: [...] }` to `PeerVaultSender`/`PeerVaultReceiver` to add TURN. A failed ICE negotiation now emits a distinct `error` naming the ICE state, and `connect()` rejects rather than hanging.
+- Transfers are not resumable. If either tab closes, the transfer restarts from the beginning.
+- The receiver assembles files in memory (`Blob`); measured peak RSS is roughly 1.5x the file size. There is no streaming to disk or IndexedDB.
+- Post-quantum cryptography: not implemented. No ML-KEM/Kyber code exists. The effective security is classical.
 - File reconstruction is entirely in browser RAM — large files (multi-GB) may exhaust device memory.
 - 1:1 only: the relay supports one sender and one receiver per room.
 - No npm publication: CDN or git clone only.

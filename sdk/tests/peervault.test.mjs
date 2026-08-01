@@ -87,7 +87,8 @@ describe('PeerVaultReceiver', () => {
 // PQCrypto — only pure-JS parts runnable in Node without WebCrypto
 // ---------------------------------------------------------------------------
 describe('PQCrypto', () => {
-  // isMLKEMSupported() checks typeof crypto; in Node 24 crypto is global.
+  // isMLKEMSupported() is deprecated and now returns false unconditionally,
+  // because PeerVault performs no ML-KEM operations. See tests/transfer.test.mjs.
   test('isMLKEMSupported() returns a boolean', () => {
     const result = PQCrypto.isMLKEMSupported();
     assert.ok(typeof result === 'boolean');
@@ -137,16 +138,14 @@ describe('PQCrypto', () => {
     assert.ok(key.usages.includes('decrypt'), 'key can decrypt');
   });
 
-  test('ECDH is NOT ML-KEM: isMLKEMSupported is an environmental probe, not a guarantee', () => {
-    // This test documents the architectural reality: the ML-KEM path
-    // silently falls back to ECDH only on virtually all current platforms.
-    // hybridKeyExchange calls crypto.subtle.deriveBits with ECDH regardless.
-    // The test verifies this is acknowledged, not papered over.
-    const result = PQCrypto.isMLKEMSupported();
-    assert.ok(typeof result === 'boolean',
-      'isMLKEMSupported() must return boolean — it is a capability probe, ' +
-      'not proof that ML-KEM is available (no browser or Node version ' +
-      'currently ships ML-KEM in WebCrypto)');
+  test('ECDH is NOT ML-KEM: no post-quantum key exchange is implemented', () => {
+    // hybridKeyExchange() calls crypto.subtle.deriveBits with { name: 'ECDH' }
+    // regardless of platform, and no ML-KEM shared secret is ever mixed into the
+    // HKDF input. Node 24 *does* ship ML-KEM-768 in WebCrypto (use
+    // PQCrypto.probeMLKEM() to detect it), so the old comment claiming no platform
+    // implements it was wrong; what matters is that PeerVault never uses it.
+    assert.equal(PQCrypto.isMLKEMSupported(), false,
+      'isMLKEMSupported() must not claim post-quantum protection that does not exist');
   });
 
   test('deriveSharedKey with custom context string does not throw', async () => {
