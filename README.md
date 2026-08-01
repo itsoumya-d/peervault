@@ -7,7 +7,7 @@
 
 <div align="center">
   <h1>PeerVault</h1>
-  <p><b>Zero-server, End-to-End Encrypted, Peer-to-Peer File Transfer SDK</b></p>
+  <p><b>PeerVault sends a file straight from one browser to another with end-to-end encryption, so it never lands on a server you have to pay for or trust.</b></p>
 
   [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-red.svg)](https://mariadb.com/bsl11/)
   [![Status: Pre-Release](https://img.shields.io/badge/status-pre--release-orange.svg)]()
