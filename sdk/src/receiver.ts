@@ -48,6 +48,7 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
   private metadataList: FileMetadata[] = [];
   private assemblers: Map<number, FileAssembler> = new Map();
   private isDownloading = false;
+  private isCancelled = false;
   private resolveConnect: ((metadata: FileMetadata[]) => void) | null = null;
   private rejectConnect: ((err: Error) => void) | null = null;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -77,8 +78,11 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
   }
 
   async connect(): Promise<FileMetadata[]> {
+    this.throwIfCancelled();
     await this.cryptoEngine.importKey(this.keyBase64Url);
+    this.throwIfCancelled();
     await this.signaling.connect();
+    this.throwIfCancelled();
 
     return new Promise<FileMetadata[]>((resolve, reject) => {
       this.resolveConnect = resolve;
@@ -119,11 +123,16 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
       this.peerConnection = new PeerConnection(this.signaling, false, { iceServers: this.iceServers });
 
       this.peerConnection.on('datachannel_open', (dc: RTCDataChannel) => {
+        if (this.isCancelled) {
+          dc.close();
+          return;
+        }
         this.dc = dc;
         this.setupDataChannel(dc);
       });
 
       this.peerConnection.on('error', (err: Error) => {
+        if (this.isCancelled) return;
         this.emit('error', err);
         this.failConnect(err);
       });
@@ -151,6 +160,7 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
   }
 
   async download(): Promise<void> {
+    this.throwIfCancelled();
     if (!this.metadataList.length) throw new Error('No metadata available to download');
     this.isDownloading = true;
 
@@ -163,6 +173,7 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
 
   private setupDataChannel(dc: RTCDataChannel) {
     dc.onmessage = (event) => {
+      if (this.isCancelled) return;
       try {
         if (typeof event.data === 'string') {
           this.handleControlMessage(event.data);
@@ -222,6 +233,7 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
       this.queue = this.queue
         .then(() => this.tryFinishFile(fileIndex))
         .catch((err) => {
+          if (this.isCancelled) return;
           this.emit('error', toError(err, 'PeerVault: failed to finalise file'));
         });
     }
@@ -231,11 +243,13 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     this.queue = this.queue
       .then(() => this.handleChunk(buffer))
       .catch((err) => {
+        if (this.isCancelled) return;
         this.emit('error', toError(err, 'PeerVault: failed to process chunk'));
       });
   }
 
   private async handleChunk(buffer: ArrayBuffer) {
+    if (this.isCancelled) return;
     if (buffer.byteLength < CHUNK_HEADER_BYTES) {
       throw new Error(
         `PeerVault: chunk frame too short (${buffer.byteLength} bytes, need at least ${CHUNK_HEADER_BYTES})`
@@ -257,6 +271,9 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     }
 
     await assembler.addChunk(chunkIndex, iv, ciphertext);
+    // WebCrypto cannot be aborted. Discard its result if cancel() happened
+    // while decrypting, before it can publish progress or create a file URL.
+    if (this.isCancelled) return;
 
     const meta = this.metadataList[fileIndex];
     const { received, bytes } = assembler.progress;
@@ -274,6 +291,7 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
   }
 
   private async tryFinishFile(fileIndex: number) {
+    if (this.isCancelled) return;
     if (this.emittedFiles.has(fileIndex)) return;
     const assembler = this.assemblers.get(fileIndex);
     if (!assembler || !assembler.isComplete()) return;
@@ -282,6 +300,7 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     const receivedFile = assembler.assemble();
     this.emittedFiles.add(fileIndex);
     this.emit('file_complete', receivedFile);
+    if (this.isCancelled) return; // A file_complete listener may cancel.
 
     if (
       !this.allCompleteEmitted &&
@@ -294,9 +313,20 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
   }
 
   cancel(): void {
-    this.clearConnectTimer();
+    if (this.isCancelled) return;
+    this.isCancelled = true;
+    this.isDownloading = false;
+    this.pendingChunks = [];
+    this.assemblers.clear();
+    this.metadataList = [];
+    this.completeSignalled.clear();
+    this.failConnect(new Error('PeerVault: transfer cancelled'));
     if (this.peerConnection) this.peerConnection.close();
     this.signaling.close();
+  }
+
+  private throwIfCancelled(): void {
+    if (this.isCancelled) throw new Error('PeerVault: transfer cancelled');
   }
 }
 

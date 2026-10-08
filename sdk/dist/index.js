@@ -824,6 +824,7 @@ var PeerVaultReceiver = class extends EventEmitter {
   metadataList = [];
   assemblers = /* @__PURE__ */ new Map();
   isDownloading = false;
+  isCancelled = false;
   resolveConnect = null;
   rejectConnect = null;
   connectTimer = null;
@@ -848,8 +849,11 @@ var PeerVaultReceiver = class extends EventEmitter {
     this.cryptoEngine = new CryptoEngine();
   }
   async connect() {
+    this.throwIfCancelled();
     await this.cryptoEngine.importKey(this.keyBase64Url);
+    this.throwIfCancelled();
     await this.signaling.connect();
+    this.throwIfCancelled();
     return new Promise((resolve, reject) => {
       this.resolveConnect = resolve;
       this.rejectConnect = reject;
@@ -878,10 +882,15 @@ var PeerVaultReceiver = class extends EventEmitter {
       });
       this.peerConnection = new PeerConnection(this.signaling, false, { iceServers: this.iceServers });
       this.peerConnection.on("datachannel_open", (dc) => {
+        if (this.isCancelled) {
+          dc.close();
+          return;
+        }
         this.dc = dc;
         this.setupDataChannel(dc);
       });
       this.peerConnection.on("error", (err) => {
+        if (this.isCancelled) return;
         this.emit("error", err);
         this.failConnect(err);
       });
@@ -905,6 +914,7 @@ var PeerVaultReceiver = class extends EventEmitter {
     }
   }
   async download() {
+    this.throwIfCancelled();
     if (!this.metadataList.length) throw new Error("No metadata available to download");
     this.isDownloading = true;
     const buffered = this.pendingChunks;
@@ -913,6 +923,7 @@ var PeerVaultReceiver = class extends EventEmitter {
   }
   setupDataChannel(dc) {
     dc.onmessage = (event) => {
+      if (this.isCancelled) return;
       try {
         if (typeof event.data === "string") {
           this.handleControlMessage(event.data);
@@ -965,16 +976,19 @@ var PeerVaultReceiver = class extends EventEmitter {
       }
       this.completeSignalled.add(fileIndex);
       this.queue = this.queue.then(() => this.tryFinishFile(fileIndex)).catch((err) => {
+        if (this.isCancelled) return;
         this.emit("error", toError2(err, "PeerVault: failed to finalise file"));
       });
     }
   }
   enqueueChunk(buffer) {
     this.queue = this.queue.then(() => this.handleChunk(buffer)).catch((err) => {
+      if (this.isCancelled) return;
       this.emit("error", toError2(err, "PeerVault: failed to process chunk"));
     });
   }
   async handleChunk(buffer) {
+    if (this.isCancelled) return;
     if (buffer.byteLength < CHUNK_HEADER_BYTES) {
       throw new Error(
         `PeerVault: chunk frame too short (${buffer.byteLength} bytes, need at least ${CHUNK_HEADER_BYTES})`
@@ -992,6 +1006,7 @@ var PeerVaultReceiver = class extends EventEmitter {
       throw new Error(`PeerVault: chunk for unknown fileIndex ${fileIndex}`);
     }
     await assembler.addChunk(chunkIndex, iv, ciphertext);
+    if (this.isCancelled) return;
     const meta = this.metadataList[fileIndex];
     const { received, bytes } = assembler.progress;
     this.emit("progress", {
@@ -1004,6 +1019,7 @@ var PeerVaultReceiver = class extends EventEmitter {
     if (received === meta.chunks) await this.tryFinishFile(fileIndex);
   }
   async tryFinishFile(fileIndex) {
+    if (this.isCancelled) return;
     if (this.emittedFiles.has(fileIndex)) return;
     const assembler = this.assemblers.get(fileIndex);
     if (!assembler || !assembler.isComplete()) return;
@@ -1011,15 +1027,26 @@ var PeerVaultReceiver = class extends EventEmitter {
     const receivedFile = assembler.assemble();
     this.emittedFiles.add(fileIndex);
     this.emit("file_complete", receivedFile);
+    if (this.isCancelled) return;
     if (!this.allCompleteEmitted && this.metadataList.length > 0 && this.metadataList.every((_, i) => this.emittedFiles.has(i))) {
       this.allCompleteEmitted = true;
       this.emit("complete", void 0);
     }
   }
   cancel() {
-    this.clearConnectTimer();
+    if (this.isCancelled) return;
+    this.isCancelled = true;
+    this.isDownloading = false;
+    this.pendingChunks = [];
+    this.assemblers.clear();
+    this.metadataList = [];
+    this.completeSignalled.clear();
+    this.failConnect(new Error("PeerVault: transfer cancelled"));
     if (this.peerConnection) this.peerConnection.close();
     this.signaling.close();
+  }
+  throwIfCancelled() {
+    if (this.isCancelled) throw new Error("PeerVault: transfer cancelled");
   }
 };
 function toError2(e, fallback) {

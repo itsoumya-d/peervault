@@ -163,7 +163,7 @@ interface ReceiverOptions {
 
 - `connect(): Promise<FileMetadata[]>` — joins the room and waits for the sender's metadata payload. **Rejects** on relay errors (e.g. `Room not found or full`), on ICE failure, on signaling close, and after `connectTimeoutMs`.
 - `download(): Promise<void>` — signals the SDK to begin processing incoming chunks.
-- `cancel(): void` — stops the download and closes connections.
+- `cancel(): void` — permanently stops this receiver and closes connections. Buffered and queued chunks are discarded; an in-flight decryption cannot emit later progress, file completion, or transfer completion. Subsequent `connect()` or `download()` calls reject; create a new receiver to retry. Blob URLs already delivered through `file_complete` remain owned by the caller.
 
 **Events:** `progress`, `file_complete` (yields `ReceivedFile`), `complete`, `error`.
 
