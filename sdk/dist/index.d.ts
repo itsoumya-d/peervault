@@ -133,6 +133,7 @@ declare class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     private metadataList;
     private assemblers;
     private isDownloading;
+    private isCancelled;
     private resolveConnect;
     private rejectConnect;
     private connectTimer;
@@ -155,6 +156,7 @@ declare class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     private handleChunk;
     private tryFinishFile;
     cancel(): void;
+    private throwIfCancelled;
 }
 
 /**
