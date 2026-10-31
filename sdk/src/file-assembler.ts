@@ -5,6 +5,7 @@
 
 import { CryptoEngine } from './crypto-engine';
 import { CHUNK_SIZE } from './file-chunker';
+import { ChunkBitmap } from './chunk-bitmap';
 import { FileMetadata, ReceivedFile } from './types';
 
 /** Hard ceiling on the declared chunk count, to bound receiver allocation. */
@@ -26,6 +27,28 @@ interface FileSystemFileHandleLike {
 }
 
 /**
+ * Wrap an existing writable stream as a chunk sink. Exported so callers can
+ * supply OPFS, File System Access, or a Node fs adapter without duplicating the
+ * offset math.
+ */
+export function createWritableSink(
+  writable: FileSystemWritableFileStreamLike,
+  chunkSize = CHUNK_SIZE
+): WritableFileSink {
+  if (!writable || typeof writable.write !== 'function' || typeof writable.close !== 'function') {
+    throw new TypeError('writable must implement write() and close()');
+  }
+  return {
+    async writeChunk(index: number, data: ArrayBuffer): Promise<void> {
+      await writable.write({ type: 'write', position: index * chunkSize, data });
+    },
+    async close(): Promise<void> {
+      await writable.close();
+    },
+  };
+}
+
+/**
  * Open a user-selected file and stream decrypted chunks into it at their byte
  * offsets. Must be called from a user gesture (the File System Access API
  * requirement). Returns null where the API is unavailable (Firefox/Safari).
@@ -42,19 +65,46 @@ export async function createFileSystemSink(
   const handle = await picker({ suggestedName });
   const writable = await handle.createWritable();
 
-  return {
-    async writeChunk(index: number, data: ArrayBuffer): Promise<void> {
-      await writable.write({ type: 'write', position: index * chunkSize, data });
-    },
-    async close(): Promise<void> {
-      await writable.close();
-    },
-  };
+  return createWritableSink(writable, chunkSize);
+}
+
+/**
+ * Open an Origin Private File System file and stream chunks into it. OPFS is
+ * origin-private (no picker, no user gesture) and persists across reloads, which
+ * makes it the default resume target in Chromium. Returns null where OPFS is
+ * unavailable.
+ */
+export async function createOpfsSink(
+  fileName: string,
+  chunkSize = CHUNK_SIZE
+): Promise<WritableFileSink | null> {
+  if (typeof fileName !== 'string' || fileName.length === 0) {
+    throw new TypeError('fileName must be a non-empty string');
+  }
+  const storage = (globalThis as unknown as {
+    navigator?: {
+      storage?: {
+        getDirectory?: () => Promise<{
+          getFileHandle: (
+            name: string,
+            options?: { create?: boolean }
+          ) => Promise<FileSystemFileHandleLike>;
+        }>;
+      };
+    };
+  }).navigator?.storage;
+  if (!storage || typeof storage.getDirectory !== 'function') return null;
+
+  const root = await storage.getDirectory();
+  const handle = await root.getFileHandle(fileName, { create: true });
+  const writable = await handle.createWritable();
+
+  return createWritableSink(writable, chunkSize);
 }
 
 export class FileAssembler {
   private chunks: ArrayBuffer[] = [];
-  private receivedIndices: boolean[] = [];
+  private bitmap: ChunkBitmap;
   private receivedChunks = 0;
   private receivedBytes = 0;
   private metadata: FileMetadata;
@@ -76,7 +126,7 @@ export class FileAssembler {
     this.metadata = metadata;
     this.cryptoEngine = cryptoEngine;
     this.chunks = new Array(declared);
-    this.receivedIndices = new Array(declared).fill(false);
+    this.bitmap = new ChunkBitmap(declared);
     this.sink = sink;
   }
 
@@ -102,7 +152,7 @@ export class FileAssembler {
       throw new Error(`Chunk index ${String(index)} out of range [0, ${this.metadata.chunks})`);
     }
 
-    if (this.receivedIndices[index]) {
+    if (this.bitmap.has(index)) {
       // Duplicate retransmission of an already-accepted chunk: ignore it.
       return this.isComplete();
     }
@@ -110,7 +160,7 @@ export class FileAssembler {
     const plaintext = await this.cryptoEngine.decryptChunk(iv, ciphertext, additionalData);
 
     // Re-check after the await: a duplicate may have completed while decrypting.
-    if (this.receivedIndices[index]) return this.isComplete();
+    if (this.bitmap.has(index)) return this.isComplete();
 
     if (this.sink) {
       await this.sink.writeChunk(index, plaintext);
@@ -118,7 +168,7 @@ export class FileAssembler {
       this.chunks[index] = plaintext;
     }
 
-    this.receivedIndices[index] = true;
+    this.bitmap.mark(index);
     this.receivedChunks++;
     this.receivedBytes += plaintext.byteLength;
 
@@ -137,6 +187,19 @@ export class FileAssembler {
   /** Distinct chunks accepted so far, plus decrypted byte total. */
   get progress(): { received: number; total: number; bytes: number } {
     return { received: this.receivedChunks, total: this.metadata.chunks, bytes: this.receivedBytes };
+  }
+
+  /** Clone of the received-chunk bitmap, safe for persistence. */
+  receivedBitmap(): ChunkBitmap {
+    return this.bitmap.clone();
+  }
+
+  /**
+   * Missing chunk indices, in ascending order. `limit` bounds the returned
+   * array; pass Infinity to enumerate everything.
+   */
+  missingChunks(limit = 1000): number[] {
+    return this.bitmap.missing(limit);
   }
 
   assemble(): ReceivedFile {

@@ -67,6 +67,8 @@ export class PeerVaultSender extends EventEmitter<SenderEvents> {
   private handshakeResolve: (() => void) | null = null;
   private handshakeReject: ((error: Error) => void) | null = null;
   private handshakeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Serialises receiver-requested chunk retransmissions. */
+  private resendQueue: Promise<void> = Promise.resolve();
 
   constructor(signalingUrl: string, options?: SenderOptions) {
     super();
@@ -229,6 +231,12 @@ export class PeerVaultSender extends EventEmitter<SenderEvents> {
       void this.handleHybridHello(raw);
     } else if (message.type === 'pv-hybrid-ready') {
       void this.handleHybridReady(raw);
+    } else if (message.type === 'pv-request-chunks') {
+      const request = message as {
+        fileIndex?: unknown;
+        indices?: unknown;
+      };
+      void this.handleChunkRequest(request);
     }
   }
 
@@ -309,7 +317,7 @@ export class PeerVaultSender extends EventEmitter<SenderEvents> {
 
       for (let i = 0; i < this.files.length; i++) {
         if (this.isCancelled) break;
-        await this.transferFile(i, chunkers[i], this.files[i].size, metadataList[i].chunks);
+        await this.transferFile(i, this.files[i].size, metadataList[i].chunks);
       }
 
       if (!this.isCancelled) {
@@ -322,45 +330,17 @@ export class PeerVaultSender extends EventEmitter<SenderEvents> {
 
   private async transferFile(
     fileIndex: number,
-    chunker: FileChunker,
     totalBytes: number,
     totalChunks: number
   ) {
-    let chunkIndex = 0;
     let bytesTransferred = 0;
+    const file = this.files[fileIndex];
 
-    while (!this.isCancelled) {
-      const chunkData = await chunker.getNextChunk();
-      if (chunkData === null) break;
+    for (let chunkIndex = 0; chunkIndex < totalChunks && !this.isCancelled; chunkIndex++) {
+      await this.sendChunk(file, fileIndex, chunkIndex);
 
-      // Binary message format:
-      // [1 byte: type (1)] [4 bytes: fileIndex] [4 bytes: chunkIndex] [12 bytes: IV] [rest: ciphertext]
-      // The full 21-byte header, including the IV, is authenticated as AES-GCM
-      // additional data. A tampered file index, chunk index, or IV therefore
-      // fails decryption before anything is written.
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      const header = new Uint8Array(21);
-      const headerView = new DataView(header.buffer);
-      headerView.setUint8(0, 1);
-      headerView.setUint32(1, fileIndex, true); // Little endian
-      headerView.setUint32(5, chunkIndex, true);
-      header.set(iv, 9);
-
-      const { ciphertext } = await this.cryptoEngine.encryptChunk(chunkData, header, iv);
-
-      const buffer = new ArrayBuffer(21 + ciphertext.byteLength);
-      const u8 = new Uint8Array(buffer);
-      u8.set(header, 0);
-      u8.set(new Uint8Array(ciphertext), 21);
-
-      await this.waitForDrain();
-
-      if (this.isCancelled) return;
-      if (!this.dc || this.dc.readyState !== 'open') throw new Error('DataChannel closed');
-
-      this.dc.send(buffer);
-
-      bytesTransferred += chunkData.byteLength;
+      const start = chunkIndex * CHUNK_SIZE;
+      bytesTransferred += Math.min(CHUNK_SIZE, Math.max(0, file.size - start));
       this.emit('progress', {
         fileIndex,
         chunkIndex,
@@ -368,8 +348,6 @@ export class PeerVaultSender extends EventEmitter<SenderEvents> {
         bytesTransferred,
         totalBytes,
       });
-
-      chunkIndex++;
     }
 
     if (!this.isCancelled && this.dc && this.dc.readyState === 'open') {
@@ -380,6 +358,94 @@ export class PeerVaultSender extends EventEmitter<SenderEvents> {
         })
       );
     }
+  }
+
+  /**
+   * Resend specific chunk indices. The receiver calls this through the
+   * `pv-request-chunks` control message after persisting a bitmap and
+   * reconnecting; each chunk is read from the original File, never buffered.
+   */
+  async resendChunks(fileIndex: number, indices: number[]): Promise<number> {
+    if (!Number.isSafeInteger(fileIndex) || fileIndex < 0 || fileIndex >= this.files.length) {
+      throw new RangeError(`fileIndex ${String(fileIndex)} is out of range`);
+    }
+    if (!Array.isArray(indices) || indices.length === 0) {
+      throw new TypeError('indices must be a non-empty array');
+    }
+    if (indices.length > 4096) {
+      throw new RangeError('at most 4096 chunks can be requested at once');
+    }
+
+    const file = this.files[fileIndex];
+    const totalChunks = this.totalChunks(file);
+    const unique = [...new Set(indices)].sort((a, b) => a - b);
+    for (const index of unique) {
+      if (!Number.isSafeInteger(index) || index < 0 || index >= totalChunks) {
+        throw new RangeError(`chunk index ${String(index)} is out of range [0, ${totalChunks})`);
+      }
+    }
+
+    const run = this.resendQueue.then(async () => {
+      for (const index of unique) {
+        await this.sendChunk(file, fileIndex, index);
+      }
+      return unique.length;
+    });
+    this.resendQueue = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  private totalChunks(file: File): number {
+    return file.size === 0 ? 1 : Math.ceil(file.size / CHUNK_SIZE);
+  }
+
+  private async handleChunkRequest(request: {
+    fileIndex?: unknown;
+    indices?: unknown;
+  }): Promise<void> {
+    try {
+      const fileIndex = Number(request.fileIndex);
+      if (!Number.isSafeInteger(fileIndex)) {
+        throw new TypeError('pv-request-chunks fileIndex must be an integer');
+      }
+      if (!Array.isArray(request.indices)) {
+        throw new TypeError('pv-request-chunks indices must be an array');
+      }
+      await this.resendChunks(fileIndex, request.indices.map(Number));
+    } catch (error) {
+      this.emit('error', toError(error, 'PeerVault: chunk resend failed'));
+    }
+  }
+
+  private async sendChunk(file: File, fileIndex: number, chunkIndex: number): Promise<void> {
+    const start = chunkIndex * CHUNK_SIZE;
+    const end = Math.min(file.size, start + CHUNK_SIZE);
+    const chunkData = await file.slice(start, end).arrayBuffer();
+
+    // Binary message format:
+    // [1 byte: type (1)] [4 bytes: fileIndex] [4 bytes: chunkIndex] [12 bytes: IV] [rest: ciphertext]
+    // The full 21-byte header, including the IV, is authenticated as AES-GCM
+    // additional data. A tampered file index, chunk index, or IV therefore
+    // fails decryption before anything is written.
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const header = new Uint8Array(21);
+    const headerView = new DataView(header.buffer);
+    headerView.setUint8(0, 1);
+    headerView.setUint32(1, fileIndex, true);
+    headerView.setUint32(5, chunkIndex, true);
+    header.set(iv, 9);
+
+    const { ciphertext } = await this.cryptoEngine.encryptChunk(chunkData, header, iv);
+
+    const buffer = new ArrayBuffer(21 + ciphertext.byteLength);
+    const u8 = new Uint8Array(buffer);
+    u8.set(header, 0);
+    u8.set(new Uint8Array(ciphertext), 21);
+
+    await this.waitForDrain();
+    if (this.isCancelled) return;
+    if (!this.dc || this.dc.readyState !== 'open') throw new Error('DataChannel closed');
+    this.dc.send(buffer);
   }
 
   /**

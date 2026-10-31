@@ -97,6 +97,8 @@ declare class PeerVaultSender extends EventEmitter<SenderEvents> {
     private handshakeResolve;
     private handshakeReject;
     private handshakeTimer;
+    /** Serialises receiver-requested chunk retransmissions. */
+    private resendQueue;
     constructor(signalingUrl: string, options?: SenderOptions);
     addFiles(files: File[]): void;
     /**
@@ -117,6 +119,15 @@ declare class PeerVaultSender extends EventEmitter<SenderEvents> {
     private failHandshake;
     private startTransfer;
     private transferFile;
+    /**
+     * Resend specific chunk indices. The receiver calls this through the
+     * `pv-request-chunks` control message after persisting a bitmap and
+     * reconnecting; each chunk is read from the original File, never buffered.
+     */
+    resendChunks(fileIndex: number, indices: number[]): Promise<number>;
+    private totalChunks;
+    private handleChunkRequest;
+    private sendChunk;
     /**
      * Waits for the data channel send buffer to drain. Bounded by stallTimeoutMs and
      * aborted by cancel() or a closing channel, so a stalled peer surfaces an error
@@ -240,6 +251,29 @@ declare class CryptoEngine {
     private base64UrlToBuffer;
 }
 
+declare const MAX_BITMAP_CHUNKS = 10000000;
+declare class ChunkBitmap {
+    readonly size: number;
+    private readonly bytes;
+    constructor(size: number, bytes?: Uint8Array);
+    mark(index: number): this;
+    clear(index: number): this;
+    has(index: number): boolean;
+    get count(): number;
+    get complete(): boolean;
+    missing(limit?: number): number[];
+    missingIterator(): IterableIterator<number>;
+    toBytes(): Uint8Array;
+    toBase64(): string;
+    toJSON(): {
+        size: number;
+        base64: string;
+    };
+    clone(): ChunkBitmap;
+    static fromBase64(value: string, size: number): ChunkBitmap;
+    static fromJSON(value: unknown): ChunkBitmap;
+}
+
 /** Hard ceiling on the declared chunk count, to bound receiver allocation. */
 declare const MAX_CHUNKS = 1000000;
 /** Minimal sink implemented by FileSystemWritableFileStream or OPFS adapters. */
@@ -247,15 +281,36 @@ interface WritableFileSink {
     writeChunk(index: number, data: ArrayBuffer): Promise<void>;
     close(): Promise<void>;
 }
+interface FileSystemWritableFileStreamLike {
+    write(data: {
+        type: 'write';
+        position: number;
+        data: ArrayBuffer;
+    }): Promise<void>;
+    close(): Promise<void>;
+}
+/**
+ * Wrap an existing writable stream as a chunk sink. Exported so callers can
+ * supply OPFS, File System Access, or a Node fs adapter without duplicating the
+ * offset math.
+ */
+declare function createWritableSink(writable: FileSystemWritableFileStreamLike, chunkSize?: number): WritableFileSink;
 /**
  * Open a user-selected file and stream decrypted chunks into it at their byte
  * offsets. Must be called from a user gesture (the File System Access API
  * requirement). Returns null where the API is unavailable (Firefox/Safari).
  */
 declare function createFileSystemSink(suggestedName: string, chunkSize?: number): Promise<WritableFileSink | null>;
+/**
+ * Open an Origin Private File System file and stream chunks into it. OPFS is
+ * origin-private (no picker, no user gesture) and persists across reloads, which
+ * makes it the default resume target in Chromium. Returns null where OPFS is
+ * unavailable.
+ */
+declare function createOpfsSink(fileName: string, chunkSize?: number): Promise<WritableFileSink | null>;
 declare class FileAssembler {
     private chunks;
-    private receivedIndices;
+    private bitmap;
     private receivedChunks;
     private receivedBytes;
     private metadata;
@@ -284,6 +339,13 @@ declare class FileAssembler {
         total: number;
         bytes: number;
     };
+    /** Clone of the received-chunk bitmap, safe for persistence. */
+    receivedBitmap(): ChunkBitmap;
+    /**
+     * Missing chunk indices, in ascending order. `limit` bounds the returned
+     * array; pass Infinity to enumerate everything.
+     */
+    missingChunks(limit?: number): number[];
     assemble(): ReceivedFile;
     /**
      * Close the disk sink and return metadata for the completed file. No Blob or
@@ -363,6 +425,13 @@ declare class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     private failConnect;
     private clearConnectTimer;
     download(): Promise<void>;
+    /**
+     * Ask the sender to resend missing chunks for one file. Intended for a
+     * resumed transfer: persist `assembler.receivedBitmap()` (or the sink's
+     * state), reconnect, then call this with the new assembler. Returns the
+     * number of indices requested.
+     */
+    requestMissingChunks(fileIndex: number, limit?: number): number;
     private setupDataChannel;
     private beginHybridHandshake;
     private handleHybridFinish;
@@ -566,4 +635,4 @@ declare class PeerConnection extends EventEmitter<PeerEvents> {
     close(): void;
 }
 
-export { CHUNK_SIZE, type CryptoCapabilities, CryptoEngine, type CryptoEngineOptions, DEFAULT_ICE_SERVERS, EventEmitter, FileAssembler, FileChunker, type FileMetadata, HybridHandshake, type HybridHandshakeJSON, type HybridRole, MAX_CHUNKS, MLKEM768_CIPHERTEXT_BYTES, MLKEM768_PUBLIC_KEY_BYTES, MLKEM768_SECRET_KEY_BYTES, MLKEM768_SEED_BYTES, MLKEM768_SHARED_SECRET_BYTES, type MeshMemory, type MeshMessage, MeshNode, type MeshState, type MeshTransport, type MeshVector, MlKem768, type MlKem768Decapsulation, type MlKem768Encapsulation, type MlKem768KeyPair, PQCrypto, PeerConnection, type PeerConnectionOptions, PeerVaultReceiver, PeerVaultSender, type ReceivedFile, type ReceiverOptions, type SenderOptions, SignalingClient, type SignalingMessage, type TransferProgress, type WritableFileSink, base64UrlToBytes, bytesToBase64Url, createFileSystemSink, decodeFloat32, encodeFloat32, textEncoder };
+export { CHUNK_SIZE, ChunkBitmap, type CryptoCapabilities, CryptoEngine, type CryptoEngineOptions, DEFAULT_ICE_SERVERS, EventEmitter, FileAssembler, FileChunker, type FileMetadata, HybridHandshake, type HybridHandshakeJSON, type HybridRole, MAX_BITMAP_CHUNKS, MAX_CHUNKS, MLKEM768_CIPHERTEXT_BYTES, MLKEM768_PUBLIC_KEY_BYTES, MLKEM768_SECRET_KEY_BYTES, MLKEM768_SEED_BYTES, MLKEM768_SHARED_SECRET_BYTES, type MeshMemory, type MeshMessage, MeshNode, type MeshState, type MeshTransport, type MeshVector, MlKem768, type MlKem768Decapsulation, type MlKem768Encapsulation, type MlKem768KeyPair, PQCrypto, PeerConnection, type PeerConnectionOptions, PeerVaultReceiver, PeerVaultSender, type ReceivedFile, type ReceiverOptions, type SenderOptions, SignalingClient, type SignalingMessage, type TransferProgress, type WritableFileSink, base64UrlToBytes, bytesToBase64Url, createFileSystemSink, createOpfsSink, createWritableSink, decodeFloat32, encodeFloat32, textEncoder };

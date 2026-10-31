@@ -104,7 +104,8 @@ sequenceDiagram
 - **Share link as a pre-shared authentication secret.** `createShareLink()` generates a random 256-bit key and embeds it in the URL fragment (`#key`). Browsers do not send fragments to servers. The key authenticates every handshake message with HMAC-SHA256, so a malicious signaling relay cannot substitute its own ephemeral keys. Anyone who obtains the full link can join the transfer, so treat the link as the secret.
 - **AES-256-GCM chunk encryption.** Each 64 KB chunk uses a unique 12-byte IV. The transfer key is derived as `HKDF(PSK || hybrid_session, transcript)` and is never sent over the wire.
 - **The full 21-byte frame header is authenticated.** The header is `[type:1][fileIndex:4][chunkIndex:4][IV:12]`. All 21 bytes — including the IV — are passed to AES-256-GCM as additional authenticated data. Tampering with any header byte causes decryption to fail. The receiver still range-checks `chunkIndex`, ignores duplicates, and verifies the assembled byte length against `metadata.size`.
-- **Optional streaming to disk.** Pass a `sinkFactory` using `createFileSystemSink()` to write each decrypted chunk at its byte offset through the File System Access API. Peak memory stays at one chunk; without a sink, chunks are assembled into a `Blob` (about 1.5x the file size).
+- **Optional streaming to disk.** Pass a `sinkFactory` using `createFileSystemSink()` (File System Access API) or `createOpfsSink()` (Origin Private File System) to write each decrypted chunk at its byte offset. Peak memory stays at one chunk; without a sink, chunks are assembled into a `Blob` (about 1.5x the file size). `createWritableSink()` adapts any writable stream, including a Node `fs` wrapper.
+- **Chunk-level resume protocol.** `FileAssembler.receivedBitmap()` returns a serializable `ChunkBitmap`; `PeerVaultReceiver.requestMissingChunks()` sends a bounded `pv-request-chunks` message; `PeerVaultSender.resendChunks()` re-reads only the requested byte ranges from the original `File`. Persisting the bitmap and reconnecting is the application's responsibility.
 
 ---
 
@@ -188,7 +189,7 @@ written.
 
 ### Validation and benchmarks
 
-See [`docs/pqc-validation.md`](docs/pqc-validation.md) for KAT results, interop checks, protocol tests, and microbenchmarks. In short: 100/100 NIST KAT vectors, interop with Node/OpenSSL, 75/75 SDK tests, and a full handshake at p50 0.836 ms / p95 1.082 ms on an Apple Silicon laptop.
+See [`docs/pqc-validation.md`](docs/pqc-validation.md) for KAT results, interop checks, protocol tests, and microbenchmarks. In short: 100/100 NIST KAT vectors, interop with Node/OpenSSL, 89/89 SDK tests, and a full handshake at p50 0.836 ms / p95 1.082 ms on an Apple Silicon laptop.
 
 ### Security scope
 
@@ -304,7 +305,7 @@ for testability and for applications that want to build their own transport.
 
 ### Also exported
 
-`CryptoEngine`, `MlKem768`, `HybridHandshake`, `FileChunker`, `FileAssembler`, `createFileSystemSink`, `CHUNK_SIZE`, `MAX_CHUNKS`, `PeerConnection`, `SignalingClient`, `DEFAULT_ICE_SERVERS`, `EventEmitter`. These are exported so that TURN servers can be supplied, streaming sinks can be attached, and the chunking/assembly path is directly testable in Node.
+`CryptoEngine`, `MlKem768`, `HybridHandshake`, `FileChunker`, `FileAssembler`, `ChunkBitmap`, `createFileSystemSink`, `createOpfsSink`, `createWritableSink`, `CHUNK_SIZE`, `MAX_CHUNKS`, `PeerConnection`, `SignalingClient`, `DEFAULT_ICE_SERVERS`, `EventEmitter`. These are exported so that TURN servers can be supplied, streaming sinks can be attached, and the chunking/assembly path is directly testable in Node.
 
 ### Type Definitions
 
@@ -416,8 +417,8 @@ WebRTC requires a secure context (`wss://`). Deploy the relay behind an SSL-term
   new PeerVaultSender(url, { iceServers: [{ urls: 'turn:turn.example.com:3478', username: 'u', credential: 'p' }] });
   ```
   ICE failure now emits an `error` naming the ICE and connection states, and `connect()` rejects instead of hanging.
-- **Transfers are not resumable.** If either tab closes the transfer must restart from the beginning. There is no chunk re-request protocol and no persisted state.
-- **Streaming to disk is opt-in and Chromium-only.** Pass a `sinkFactory` using `createFileSystemSink()` (File System Access API) to write chunks directly to a user-selected file; otherwise the receiver assembles a `Blob` in RAM (measured peak ~1.5x file size). Sink writes use chunk offsets, so out-of-order delivery is supported. There is no resume across page reloads or persisted transfer state.
+- **Resume is manual, not automatic.** The chunk bitmap, `requestMissingChunks()`, and `resendChunks()` primitives are shipped, but the SDK does not persist a transfer journal, auto-reconnect, or re-open the sink for you. Persist `receivedBitmap()`, reopen the sink, reconnect, then request missing chunks.
+- **Streaming to disk is opt-in.** Use `createFileSystemSink()` (File System Access), `createOpfsSink()` (OPFS, Chromium), or `createWritableSink()` for a custom/Node writable. Without a sink the receiver assembles a `Blob` in RAM (~1.5x file size). Sink writes use chunk offsets, so out-of-order delivery is supported. There is no automatic cross-reload resume journal.
 - **Protocol compatibility.** The default protocol authenticates the full 21-byte frame header and runs the hybrid handshake. Peers running a pre-AAD or pre-PQC build cannot interoperate with the defaults; upgrade both ends together, or explicitly disable `hybridHandshake` on both sides for the legacy key-only path.
 - **1:1 sessions.** The relay supports one sender and one receiver per room.
 - **Browser environment required** for full operation. `PeerVaultSender` and `PeerVaultReceiver` require `RTCPeerConnection` and `WebSocket`. `PQCrypto` static methods work in Node 24 (has `crypto.subtle`).

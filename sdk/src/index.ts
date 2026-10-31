@@ -14,6 +14,7 @@ export * from './datamesh';
 // and so the chunking / assembly / crypto paths are directly testable.
 export * from './crypto-engine';
 export * from './file-chunker';
+export * from './chunk-bitmap';
 export * from './file-assembler';
 export * from './peer-connection';
 export * from './signaling-client';
