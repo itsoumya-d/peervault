@@ -11,8 +11,12 @@ export interface FileMetadata {
 }
 
 export interface ReceivedFile extends FileMetadata {
-  blob: Blob;
-  url: string;
+  /** Present for in-memory assembly. Absent when the file was streamed to disk. */
+  blob?: Blob;
+  /** Present for in-memory assembly. Absent when the file was streamed to disk. */
+  url?: string;
+  /** True when the receiver wrote chunks directly to a user-selected file. */
+  streamed?: boolean;
 }
 
 export interface TransferProgress {

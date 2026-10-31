@@ -82,12 +82,16 @@ export class CryptoEngine {
     this.key = await PQCrypto.deriveSharedKey(sharedSecret);
   }
 
-  async encryptChunk(data: ArrayBuffer): Promise<{ iv: Uint8Array; ciphertext: ArrayBuffer }> {
+  async encryptChunk(
+    data: ArrayBuffer,
+    additionalData?: Uint8Array
+  ): Promise<{ iv: Uint8Array; ciphertext: ArrayBuffer }> {
     if (!this.key) throw new Error('Key not initialized');
 
     const iv = crypto.getRandomValues(new Uint8Array(12));
+    const aad = additionalData ? new Uint8Array(additionalData) : undefined;
     const ciphertext = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv },
+      aad ? { name: 'AES-GCM', iv, additionalData: aad } : { name: 'AES-GCM', iv },
       this.key,
       data
     );
@@ -95,7 +99,11 @@ export class CryptoEngine {
     return { iv, ciphertext };
   }
 
-  async decryptChunk(iv: Uint8Array, ciphertext: ArrayBuffer): Promise<ArrayBuffer> {
+  async decryptChunk(
+    iv: Uint8Array,
+    ciphertext: ArrayBuffer,
+    additionalData?: Uint8Array
+  ): Promise<ArrayBuffer> {
     if (!this.key) throw new Error('Key not initialized');
 
     // Copy into an ArrayBuffer-backed view: an incoming Uint8Array may be typed as
@@ -103,9 +111,12 @@ export class CryptoEngine {
     // `strict` and made `tsc --noEmit` fail on this file.
     const ivBytes = new Uint8Array(iv.byteLength);
     ivBytes.set(iv);
+    const aad = additionalData ? new Uint8Array(additionalData) : undefined;
 
     return crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: ivBytes },
+      aad
+        ? { name: 'AES-GCM', iv: ivBytes, additionalData: aad }
+        : { name: 'AES-GCM', iv: ivBytes },
       this.key,
       ciphertext
     );

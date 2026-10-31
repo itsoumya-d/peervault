@@ -411,22 +411,24 @@ var CryptoEngine = class {
     const sharedSecret = await PQCrypto.hybridKeyExchange(this.localKeyPair.privateKey, remotePublic);
     this.key = await PQCrypto.deriveSharedKey(sharedSecret);
   }
-  async encryptChunk(data) {
+  async encryptChunk(data, additionalData) {
     if (!this.key) throw new Error("Key not initialized");
     const iv = crypto.getRandomValues(new Uint8Array(12));
+    const aad = additionalData ? new Uint8Array(additionalData) : void 0;
     const ciphertext = await crypto.subtle.encrypt(
-      { name: "AES-GCM", iv },
+      aad ? { name: "AES-GCM", iv, additionalData: aad } : { name: "AES-GCM", iv },
       this.key,
       data
     );
     return { iv, ciphertext };
   }
-  async decryptChunk(iv, ciphertext) {
+  async decryptChunk(iv, ciphertext, additionalData) {
     if (!this.key) throw new Error("Key not initialized");
     const ivBytes = new Uint8Array(iv.byteLength);
     ivBytes.set(iv);
+    const aad = additionalData ? new Uint8Array(additionalData) : void 0;
     return crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: ivBytes },
+      aad ? { name: "AES-GCM", iv: ivBytes, additionalData: aad } : { name: "AES-GCM", iv: ivBytes },
       this.key,
       ciphertext
     );
@@ -630,13 +632,15 @@ var PeerVaultSender = class extends EventEmitter {
     while (!this.isCancelled) {
       const chunkData = await chunker.getNextChunk();
       if (chunkData === null) break;
-      const { iv, ciphertext } = await this.cryptoEngine.encryptChunk(chunkData);
-      const buffer = new ArrayBuffer(1 + 4 + 4 + 12 + ciphertext.byteLength);
-      const view = new DataView(buffer);
+      const header = new Uint8Array(9);
+      const headerView = new DataView(header.buffer);
+      headerView.setUint8(0, 1);
+      headerView.setUint32(1, fileIndex, true);
+      headerView.setUint32(5, chunkIndex, true);
+      const { iv, ciphertext } = await this.cryptoEngine.encryptChunk(chunkData, header);
+      const buffer = new ArrayBuffer(21 + ciphertext.byteLength);
       const u8 = new Uint8Array(buffer);
-      view.setUint8(0, 1);
-      view.setUint32(1, fileIndex, true);
-      view.setUint32(5, chunkIndex, true);
+      u8.set(header, 0);
       u8.set(iv, 9);
       u8.set(new Uint8Array(ciphertext), 21);
       await this.waitForDrain();
@@ -697,13 +701,29 @@ function toError(e, fallback) {
 
 // src/file-assembler.ts
 var MAX_CHUNKS = 1e6;
+async function createFileSystemSink(suggestedName, chunkSize = CHUNK_SIZE) {
+  const picker = globalThis.showSaveFilePicker;
+  if (typeof picker !== "function") return null;
+  const handle = await picker({ suggestedName });
+  const writable = await handle.createWritable();
+  return {
+    async writeChunk(index, data) {
+      await writable.write({ type: "write", position: index * chunkSize, data });
+    },
+    async close() {
+      await writable.close();
+    }
+  };
+}
 var FileAssembler = class {
   chunks = [];
+  receivedIndices = [];
   receivedChunks = 0;
   receivedBytes = 0;
   metadata;
   cryptoEngine;
-  constructor(metadata, cryptoEngine) {
+  sink;
+  constructor(metadata, cryptoEngine, sink) {
     const declared = metadata?.chunks;
     if (!Number.isSafeInteger(declared) || declared < 0 || declared > MAX_CHUNKS) {
       throw new Error(
@@ -718,24 +738,36 @@ var FileAssembler = class {
     this.metadata = metadata;
     this.cryptoEngine = cryptoEngine;
     this.chunks = new Array(declared);
+    this.receivedIndices = new Array(declared).fill(false);
+    this.sink = sink;
   }
   /**
    * Decrypt and store one chunk. Resolves true once every distinct chunk index
    * in [0, metadata.chunks) has been received.
    *
-   * Duplicate and out-of-range indices are rejected rather than counted. Counting
-   * arrivals instead of distinct indices previously allowed a duplicate chunk to
-   * mask a missing one, which produced a silently corrupt file.
+   * `additionalData` must be the 9-byte frame header (type, fileIndex,
+   * chunkIndex). Binding it to AES-GCM prevents a valid ciphertext from being
+   * replayed under a different file or chunk index.
+   *
+   * Duplicate and out-of-range indices are rejected rather than counted. When a
+   * sink is attached, plaintext is written straight to disk and never retained
+   * in memory.
    */
-  async addChunk(index, iv, ciphertext) {
+  async addChunk(index, iv, ciphertext, additionalData) {
     if (!Number.isSafeInteger(index) || index < 0 || index >= this.metadata.chunks) {
       throw new Error(`Chunk index ${String(index)} out of range [0, ${this.metadata.chunks})`);
     }
-    const plaintext = await this.cryptoEngine.decryptChunk(iv, ciphertext);
-    if (this.chunks[index] !== void 0) {
+    if (this.receivedIndices[index]) {
       return this.isComplete();
     }
-    this.chunks[index] = plaintext;
+    const plaintext = await this.cryptoEngine.decryptChunk(iv, ciphertext, additionalData);
+    if (this.receivedIndices[index]) return this.isComplete();
+    if (this.sink) {
+      await this.sink.writeChunk(index, plaintext);
+    } else {
+      this.chunks[index] = plaintext;
+    }
+    this.receivedIndices[index] = true;
     this.receivedChunks++;
     this.receivedBytes += plaintext.byteLength;
     return this.isComplete();
@@ -743,11 +775,18 @@ var FileAssembler = class {
   isComplete() {
     return this.receivedChunks === this.metadata.chunks;
   }
+  /** True when chunks are being written directly to a file sink. */
+  get streaming() {
+    return this.sink !== void 0;
+  }
   /** Distinct chunks accepted so far, plus decrypted byte total. */
   get progress() {
     return { received: this.receivedChunks, total: this.metadata.chunks, bytes: this.receivedBytes };
   }
   assemble() {
+    if (this.sink) {
+      throw new Error("FileAssembler: disk sink active; call finishStreaming() instead");
+    }
     if (!this.isComplete()) {
       throw new Error(
         `File incomplete: ${this.receivedChunks} of ${this.metadata.chunks} chunks received`
@@ -758,11 +797,7 @@ var FileAssembler = class {
         throw new Error(`File incomplete: chunk ${i} is missing`);
       }
     }
-    if (this.receivedBytes !== this.metadata.size) {
-      throw new Error(
-        `File corrupt: assembled ${this.receivedBytes} bytes but metadata declared ${this.metadata.size}`
-      );
-    }
+    this.assertByteLength();
     const blob = new Blob(this.chunks, { type: this.metadata.mime });
     const url = URL.createObjectURL(blob);
     return {
@@ -770,6 +805,46 @@ var FileAssembler = class {
       blob,
       url
     };
+  }
+  /**
+   * Close the disk sink and return metadata for the completed file. No Blob or
+   * object URL is created, so peak memory stays at one chunk.
+   */
+  async finishStreaming() {
+    if (!this.sink) {
+      throw new Error("FileAssembler: finishStreaming() requires a disk sink");
+    }
+    if (!this.isComplete()) {
+      throw new Error(
+        `File incomplete: ${this.receivedChunks} of ${this.metadata.chunks} chunks received`
+      );
+    }
+    this.assertByteLength();
+    const sink = this.sink;
+    this.sink = void 0;
+    await sink.close();
+    return {
+      ...this.metadata,
+      streamed: true
+    };
+  }
+  /** Close an open sink without publishing the file (cancellation path). */
+  async abort() {
+    const sink = this.sink;
+    this.sink = void 0;
+    if (sink) {
+      try {
+        await sink.close();
+      } catch {
+      }
+    }
+  }
+  assertByteLength() {
+    if (this.receivedBytes !== this.metadata.size) {
+      throw new Error(
+        `File corrupt: assembled ${this.receivedBytes} bytes but metadata declared ${this.metadata.size}`
+      );
+    }
   }
 };
 
@@ -784,6 +859,7 @@ var PeerVaultReceiver = class extends EventEmitter {
   dc = null;
   connectTimeoutMs;
   iceServers;
+  sinkFactory;
   metadataList = [];
   assemblers = /* @__PURE__ */ new Map();
   isDownloading = false;
@@ -808,6 +884,7 @@ var PeerVaultReceiver = class extends EventEmitter {
     this.keyBase64Url = key;
     this.iceServers = options?.iceServers;
     this.connectTimeoutMs = options?.connectTimeoutMs ?? 6e4;
+    this.sinkFactory = options?.sinkFactory;
     this.signaling = new SignalingClient(signalingUrl);
     this.cryptoEngine = new CryptoEngine();
   }
@@ -918,18 +995,12 @@ var PeerVaultReceiver = class extends EventEmitter {
         throw new Error("PeerVault: metadata message has no files array");
       }
       const files = m.files;
-      this.assemblers.clear();
-      files.forEach((meta, i) => {
-        this.assemblers.set(i, new FileAssembler(meta, this.cryptoEngine));
+      this.queue = this.queue.then(() => this.setupFiles(files)).catch((err) => {
+        if (this.isCancelled) return;
+        const error = toError2(err, "PeerVault: failed to prepare files");
+        this.emit("error", error);
+        this.failConnect(error);
       });
-      this.metadataList = files;
-      this.clearConnectTimer();
-      if (this.resolveConnect) {
-        const resolve = this.resolveConnect;
-        this.resolveConnect = null;
-        this.rejectConnect = null;
-        resolve(this.metadataList);
-      }
     } else if (m.type === "complete") {
       const fileIndex = Number(m.fileIndex);
       if (!Number.isSafeInteger(fileIndex)) {
@@ -942,6 +1013,29 @@ var PeerVaultReceiver = class extends EventEmitter {
         if (this.isCancelled) return;
         this.emit("error", toError2(err, "PeerVault: failed to finalise file"));
       });
+    }
+  }
+  async setupFiles(files) {
+    const assemblers = /* @__PURE__ */ new Map();
+    for (let i = 0; i < files.length; i++) {
+      let sink;
+      if (this.sinkFactory) {
+        try {
+          sink = await this.sinkFactory(files[i], i) ?? void 0;
+        } catch (err) {
+          this.emit("error", toError2(err, "PeerVault: failed to open disk sink"));
+        }
+      }
+      assemblers.set(i, new FileAssembler(files[i], this.cryptoEngine, sink));
+    }
+    this.assemblers = assemblers;
+    this.metadataList = files;
+    this.clearConnectTimer();
+    if (this.resolveConnect) {
+      const resolve = this.resolveConnect;
+      this.resolveConnect = null;
+      this.rejectConnect = null;
+      resolve(this.metadataList);
     }
   }
   enqueueChunk(buffer) {
@@ -964,11 +1058,12 @@ var PeerVaultReceiver = class extends EventEmitter {
     const chunkIndex = view.getUint32(5, true);
     const iv = new Uint8Array(buffer, 9, 12);
     const ciphertext = buffer.slice(CHUNK_HEADER_BYTES);
+    const additionalData = new Uint8Array(buffer.slice(0, 9));
     const assembler = this.assemblers.get(fileIndex);
     if (!assembler) {
       throw new Error(`PeerVault: chunk for unknown fileIndex ${fileIndex}`);
     }
-    await assembler.addChunk(chunkIndex, iv, ciphertext);
+    await assembler.addChunk(chunkIndex, iv, ciphertext, additionalData);
     if (this.isCancelled) return;
     const meta = this.metadataList[fileIndex];
     const { received, bytes } = assembler.progress;
@@ -987,7 +1082,7 @@ var PeerVaultReceiver = class extends EventEmitter {
     const assembler = this.assemblers.get(fileIndex);
     if (!assembler || !assembler.isComplete()) return;
     if (!this.completeSignalled.has(fileIndex)) return;
-    const receivedFile = assembler.assemble();
+    const receivedFile = assembler.streaming ? await assembler.finishStreaming() : assembler.assemble();
     this.emittedFiles.add(fileIndex);
     this.emit("file_complete", receivedFile);
     if (this.isCancelled) return;
@@ -1001,6 +1096,7 @@ var PeerVaultReceiver = class extends EventEmitter {
     this.isCancelled = true;
     this.isDownloading = false;
     this.pendingChunks = [];
+    for (const assembler of this.assemblers.values()) void assembler.abort();
     this.assemblers.clear();
     this.metadataList = [];
     this.completeSignalled.clear();
@@ -1032,6 +1128,7 @@ export {
   PeerConnection,
   PeerVaultReceiver,
   PeerVaultSender,
-  SignalingClient
+  SignalingClient,
+  createFileSystemSink
 };
 //# sourceMappingURL=index.mjs.map

@@ -78,12 +78,18 @@ async function receiverFixture(t) {
     await connecting;
     const frames = [];
     for (let i = 0; i < parts.length; i++) {
-      const { iv, ciphertext } = await sender.encryptChunk(Uint8Array.from(parts[i]).buffer);
+      const header = new Uint8Array(9);
+      const headerView = new DataView(header.buffer);
+      headerView.setUint8(0, 1);
+      headerView.setUint32(1, 0, true);
+      headerView.setUint32(5, i, true);
+
+      const { iv, ciphertext } = await sender.encryptChunk(
+        Uint8Array.from(parts[i]).buffer,
+        header
+      );
       const frame = new ArrayBuffer(21 + ciphertext.byteLength);
-      const view = new DataView(frame);
-      view.setUint8(0, 1);
-      view.setUint32(1, 0, true);
-      view.setUint32(5, i, true);
+      new Uint8Array(frame).set(header, 0);
       new Uint8Array(frame).set(iv, 9);
       new Uint8Array(frame).set(new Uint8Array(ciphertext), 21);
       frames.push(frame);

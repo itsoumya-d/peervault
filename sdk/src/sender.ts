@@ -222,17 +222,22 @@ export class PeerVaultSender extends EventEmitter<SenderEvents> {
       const chunkData = await chunker.getNextChunk();
       if (chunkData === null) break;
 
-      const { iv, ciphertext } = await this.cryptoEngine.encryptChunk(chunkData);
-
       // Binary message format:
       // [1 byte: type (1)] [4 bytes: fileIndex] [4 bytes: chunkIndex] [12 bytes: IV] [rest: ciphertext]
-      const buffer = new ArrayBuffer(1 + 4 + 4 + 12 + ciphertext.byteLength);
-      const view = new DataView(buffer);
-      const u8 = new Uint8Array(buffer);
+      // The first 9 bytes are authenticated as AES-GCM additional data, so a
+      // receiver cannot be tricked into reassigning a valid ciphertext to a
+      // different file or chunk index.
+      const header = new Uint8Array(9);
+      const headerView = new DataView(header.buffer);
+      headerView.setUint8(0, 1);
+      headerView.setUint32(1, fileIndex, true); // Little endian
+      headerView.setUint32(5, chunkIndex, true);
 
-      view.setUint8(0, 1);
-      view.setUint32(1, fileIndex, true); // Little endian
-      view.setUint32(5, chunkIndex, true);
+      const { iv, ciphertext } = await this.cryptoEngine.encryptChunk(chunkData, header);
+
+      const buffer = new ArrayBuffer(21 + ciphertext.byteLength);
+      const u8 = new Uint8Array(buffer);
+      u8.set(header, 0);
       u8.set(iv, 9);
       u8.set(new Uint8Array(ciphertext), 21);
 

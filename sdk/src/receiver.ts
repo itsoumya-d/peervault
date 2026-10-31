@@ -7,7 +7,7 @@ import { EventEmitter } from './events';
 import { SignalingClient } from './signaling-client';
 import { PeerConnection } from './peer-connection';
 import { CryptoEngine } from './crypto-engine';
-import { FileAssembler } from './file-assembler';
+import { FileAssembler, WritableFileSink } from './file-assembler';
 import { FileMetadata, ReceivedFile, TransferProgress } from './types';
 
 interface ReceiverEvents {
@@ -30,6 +30,13 @@ export interface ReceiverOptions {
    * ICE negotiation leaves connect() pending forever. Pass 0 to disable.
    */
   connectTimeoutMs?: number;
+  /**
+   * Optional streaming sink factory. When provided, each file is written
+   * directly to the returned sink instead of being accumulated in memory.
+   * Called when the sender's metadata arrives; use an OPFS sink or open the
+   * picker from the user gesture that starts the transfer.
+   */
+  sinkFactory?: (metadata: FileMetadata, fileIndex: number) => Promise<WritableFileSink | null>;
 }
 
 /** Header layout: [1B type][4B fileIndex][4B chunkIndex][12B IV][ciphertext] */
@@ -44,6 +51,7 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
   private dc: RTCDataChannel | null = null;
   private connectTimeoutMs: number;
   private iceServers?: RTCIceServer[];
+  private sinkFactory?: ReceiverOptions['sinkFactory'];
 
   private metadataList: FileMetadata[] = [];
   private assemblers: Map<number, FileAssembler> = new Map();
@@ -73,6 +81,7 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     this.keyBase64Url = key;
     this.iceServers = options?.iceServers;
     this.connectTimeoutMs = options?.connectTimeoutMs ?? 60_000;
+    this.sinkFactory = options?.sinkFactory;
     this.signaling = new SignalingClient(signalingUrl);
     this.cryptoEngine = new CryptoEngine();
   }
@@ -207,19 +216,16 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
         throw new Error('PeerVault: metadata message has no files array');
       }
       const files = m.files as FileMetadata[];
-      this.assemblers.clear();
-      // FileAssembler validates chunks/size and throws on hostile values.
-      files.forEach((meta, i) => {
-        this.assemblers.set(i, new FileAssembler(meta, this.cryptoEngine));
-      });
-      this.metadataList = files;
-      this.clearConnectTimer();
-      if (this.resolveConnect) {
-        const resolve = this.resolveConnect;
-        this.resolveConnect = null;
-        this.rejectConnect = null;
-        resolve(this.metadataList);
-      }
+      // Sink creation is async (File System Access API), so prepare the
+      // assemblers on the serialised queue to keep chunk ordering intact.
+      this.queue = this.queue
+        .then(() => this.setupFiles(files))
+        .catch((err) => {
+          if (this.isCancelled) return;
+          const error = toError(err, 'PeerVault: failed to prepare files');
+          this.emit('error', error);
+          this.failConnect(error);
+        });
     } else if (m.type === 'complete') {
       const fileIndex = Number(m.fileIndex);
       if (!Number.isSafeInteger(fileIndex)) {
@@ -236,6 +242,34 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
           if (this.isCancelled) return;
           this.emit('error', toError(err, 'PeerVault: failed to finalise file'));
         });
+    }
+  }
+
+  private async setupFiles(files: FileMetadata[]): Promise<void> {
+    const assemblers = new Map<number, FileAssembler>();
+
+    for (let i = 0; i < files.length; i++) {
+      let sink: WritableFileSink | undefined;
+      if (this.sinkFactory) {
+        try {
+          sink = (await this.sinkFactory(files[i], i)) ?? undefined;
+        } catch (err) {
+          // Fall back to in-memory assembly if the picker is cancelled or the
+          // sink cannot be opened; the transfer itself remains valid.
+          this.emit('error', toError(err, 'PeerVault: failed to open disk sink'));
+        }
+      }
+      assemblers.set(i, new FileAssembler(files[i], this.cryptoEngine, sink));
+    }
+
+    this.assemblers = assemblers;
+    this.metadataList = files;
+    this.clearConnectTimer();
+    if (this.resolveConnect) {
+      const resolve = this.resolveConnect;
+      this.resolveConnect = null;
+      this.rejectConnect = null;
+      resolve(this.metadataList);
     }
   }
 
@@ -264,13 +298,15 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     const chunkIndex = view.getUint32(5, true);
     const iv = new Uint8Array(buffer, 9, 12);
     const ciphertext = buffer.slice(CHUNK_HEADER_BYTES);
+    // Authenticate type/fileIndex/chunkIndex as AES-GCM additional data.
+    const additionalData = new Uint8Array(buffer.slice(0, 9));
 
     const assembler = this.assemblers.get(fileIndex);
     if (!assembler) {
       throw new Error(`PeerVault: chunk for unknown fileIndex ${fileIndex}`);
     }
 
-    await assembler.addChunk(chunkIndex, iv, ciphertext);
+    await assembler.addChunk(chunkIndex, iv, ciphertext, additionalData);
     // WebCrypto cannot be aborted. Discard its result if cancel() happened
     // while decrypting, before it can publish progress or create a file URL.
     if (this.isCancelled) return;
@@ -297,7 +333,9 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     if (!assembler || !assembler.isComplete()) return;
     if (!this.completeSignalled.has(fileIndex)) return;
 
-    const receivedFile = assembler.assemble();
+    const receivedFile = assembler.streaming
+      ? await assembler.finishStreaming()
+      : assembler.assemble();
     this.emittedFiles.add(fileIndex);
     this.emit('file_complete', receivedFile);
     if (this.isCancelled) return; // A file_complete listener may cancel.
@@ -317,6 +355,7 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     this.isCancelled = true;
     this.isDownloading = false;
     this.pendingChunks = [];
+    for (const assembler of this.assemblers.values()) void assembler.abort();
     this.assemblers.clear();
     this.metadataList = [];
     this.completeSignalled.clear();

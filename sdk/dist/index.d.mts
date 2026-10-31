@@ -5,8 +5,12 @@ interface FileMetadata {
     chunks: number;
 }
 interface ReceivedFile extends FileMetadata {
-    blob: Blob;
-    url: string;
+    /** Present for in-memory assembly. Absent when the file was streamed to disk. */
+    blob?: Blob;
+    /** Present for in-memory assembly. Absent when the file was streamed to disk. */
+    url?: string;
+    /** True when the receiver wrote chunks directly to a user-selected file. */
+    streamed?: boolean;
 }
 interface TransferProgress {
     fileIndex: number;
@@ -99,64 +103,6 @@ declare class PeerVaultSender extends EventEmitter<SenderEvents> {
      */
     private waitForDrain;
     cancel(): void;
-}
-
-interface ReceiverEvents {
-    progress: TransferProgress;
-    file_complete: ReceivedFile;
-    complete: void;
-    error: Error;
-}
-interface ReceiverOptions {
-    /**
-     * ICE servers for the peer connection. Defaults to public STUN only, which
-     * cannot traverse symmetric or carrier-grade NAT. Supply a TURN entry here for
-     * reliable connectivity.
-     */
-    iceServers?: RTCIceServer[];
-    /**
-     * Milliseconds to wait for the sender's metadata after joining the room before
-     * connect() rejects. Without this, an unreachable peer, a dead relay or a failed
-     * ICE negotiation leaves connect() pending forever. Pass 0 to disable.
-     */
-    connectTimeoutMs?: number;
-}
-declare class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
-    private signaling;
-    private peerConnection;
-    private cryptoEngine;
-    private roomId;
-    private keyBase64Url;
-    private dc;
-    private connectTimeoutMs;
-    private iceServers?;
-    private metadataList;
-    private assemblers;
-    private isDownloading;
-    private isCancelled;
-    private resolveConnect;
-    private rejectConnect;
-    private connectTimer;
-    /** Chunks that arrived before download() was called, replayed once it is. */
-    private pendingChunks;
-    /** Serialises chunk handling so completion is never evaluated against a stale count. */
-    private queue;
-    /** fileIndex values for which the sender has already sent its 'complete' marker. */
-    private completeSignalled;
-    private emittedFiles;
-    private allCompleteEmitted;
-    constructor(signalingUrl: string, shareLinkData: string, options?: ReceiverOptions);
-    connect(): Promise<FileMetadata[]>;
-    private failConnect;
-    private clearConnectTimer;
-    download(): Promise<void>;
-    private setupDataChannel;
-    private handleControlMessage;
-    private enqueueChunk;
-    private handleChunk;
-    private tryFinishFile;
-    cancel(): void;
-    private throwIfCancelled;
 }
 
 /**
@@ -259,34 +205,53 @@ declare class CryptoEngine {
     importKey(base64UrlKey: string): Promise<void>;
     getLocalPublicKey(): Promise<string>;
     negotiateKey(remotePeerPublicKey: string): Promise<void>;
-    encryptChunk(data: ArrayBuffer): Promise<{
+    encryptChunk(data: ArrayBuffer, additionalData?: Uint8Array): Promise<{
         iv: Uint8Array;
         ciphertext: ArrayBuffer;
     }>;
-    decryptChunk(iv: Uint8Array, ciphertext: ArrayBuffer): Promise<ArrayBuffer>;
+    decryptChunk(iv: Uint8Array, ciphertext: ArrayBuffer, additionalData?: Uint8Array): Promise<ArrayBuffer>;
     private bufferToBase64Url;
     private base64UrlToBuffer;
 }
 
 /** Hard ceiling on the declared chunk count, to bound receiver allocation. */
 declare const MAX_CHUNKS = 1000000;
+/** Minimal sink implemented by FileSystemWritableFileStream or OPFS adapters. */
+interface WritableFileSink {
+    writeChunk(index: number, data: ArrayBuffer): Promise<void>;
+    close(): Promise<void>;
+}
+/**
+ * Open a user-selected file and stream decrypted chunks into it at their byte
+ * offsets. Must be called from a user gesture (the File System Access API
+ * requirement). Returns null where the API is unavailable (Firefox/Safari).
+ */
+declare function createFileSystemSink(suggestedName: string, chunkSize?: number): Promise<WritableFileSink | null>;
 declare class FileAssembler {
     private chunks;
+    private receivedIndices;
     private receivedChunks;
     private receivedBytes;
     private metadata;
     private cryptoEngine;
-    constructor(metadata: FileMetadata, cryptoEngine: CryptoEngine);
+    private sink?;
+    constructor(metadata: FileMetadata, cryptoEngine: CryptoEngine, sink?: WritableFileSink);
     /**
      * Decrypt and store one chunk. Resolves true once every distinct chunk index
      * in [0, metadata.chunks) has been received.
      *
-     * Duplicate and out-of-range indices are rejected rather than counted. Counting
-     * arrivals instead of distinct indices previously allowed a duplicate chunk to
-     * mask a missing one, which produced a silently corrupt file.
+     * `additionalData` must be the 9-byte frame header (type, fileIndex,
+     * chunkIndex). Binding it to AES-GCM prevents a valid ciphertext from being
+     * replayed under a different file or chunk index.
+     *
+     * Duplicate and out-of-range indices are rejected rather than counted. When a
+     * sink is attached, plaintext is written straight to disk and never retained
+     * in memory.
      */
-    addChunk(index: number, iv: Uint8Array, ciphertext: ArrayBuffer): Promise<boolean>;
+    addChunk(index: number, iv: Uint8Array, ciphertext: ArrayBuffer, additionalData?: Uint8Array): Promise<boolean>;
     isComplete(): boolean;
+    /** True when chunks are being written directly to a file sink. */
+    get streaming(): boolean;
     /** Distinct chunks accepted so far, plus decrypted byte total. */
     get progress(): {
         received: number;
@@ -294,6 +259,81 @@ declare class FileAssembler {
         bytes: number;
     };
     assemble(): ReceivedFile;
+    /**
+     * Close the disk sink and return metadata for the completed file. No Blob or
+     * object URL is created, so peak memory stays at one chunk.
+     */
+    finishStreaming(): Promise<ReceivedFile>;
+    /** Close an open sink without publishing the file (cancellation path). */
+    abort(): Promise<void>;
+    private assertByteLength;
+}
+
+interface ReceiverEvents {
+    progress: TransferProgress;
+    file_complete: ReceivedFile;
+    complete: void;
+    error: Error;
+}
+interface ReceiverOptions {
+    /**
+     * ICE servers for the peer connection. Defaults to public STUN only, which
+     * cannot traverse symmetric or carrier-grade NAT. Supply a TURN entry here for
+     * reliable connectivity.
+     */
+    iceServers?: RTCIceServer[];
+    /**
+     * Milliseconds to wait for the sender's metadata after joining the room before
+     * connect() rejects. Without this, an unreachable peer, a dead relay or a failed
+     * ICE negotiation leaves connect() pending forever. Pass 0 to disable.
+     */
+    connectTimeoutMs?: number;
+    /**
+     * Optional streaming sink factory. When provided, each file is written
+     * directly to the returned sink instead of being accumulated in memory.
+     * Called when the sender's metadata arrives; use an OPFS sink or open the
+     * picker from the user gesture that starts the transfer.
+     */
+    sinkFactory?: (metadata: FileMetadata, fileIndex: number) => Promise<WritableFileSink | null>;
+}
+declare class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
+    private signaling;
+    private peerConnection;
+    private cryptoEngine;
+    private roomId;
+    private keyBase64Url;
+    private dc;
+    private connectTimeoutMs;
+    private iceServers?;
+    private sinkFactory?;
+    private metadataList;
+    private assemblers;
+    private isDownloading;
+    private isCancelled;
+    private resolveConnect;
+    private rejectConnect;
+    private connectTimer;
+    /** Chunks that arrived before download() was called, replayed once it is. */
+    private pendingChunks;
+    /** Serialises chunk handling so completion is never evaluated against a stale count. */
+    private queue;
+    /** fileIndex values for which the sender has already sent its 'complete' marker. */
+    private completeSignalled;
+    private emittedFiles;
+    private allCompleteEmitted;
+    constructor(signalingUrl: string, shareLinkData: string, options?: ReceiverOptions);
+    connect(): Promise<FileMetadata[]>;
+    private failConnect;
+    private clearConnectTimer;
+    download(): Promise<void>;
+    private setupDataChannel;
+    private handleControlMessage;
+    private setupFiles;
+    private enqueueChunk;
+    private handleChunk;
+    private tryFinishFile;
+    cancel(): void;
+    private throwIfCancelled;
 }
 
 interface SignalingEvents {
@@ -355,4 +395,4 @@ declare class PeerConnection extends EventEmitter<PeerEvents> {
     close(): void;
 }
 
-export { CHUNK_SIZE, type CryptoCapabilities, CryptoEngine, type CryptoEngineOptions, DEFAULT_ICE_SERVERS, EventEmitter, FileAssembler, FileChunker, type FileMetadata, MAX_CHUNKS, PQCrypto, PeerConnection, type PeerConnectionOptions, PeerVaultReceiver, PeerVaultSender, type ReceivedFile, type ReceiverOptions, type SenderOptions, SignalingClient, type SignalingMessage, type TransferProgress };
+export { CHUNK_SIZE, type CryptoCapabilities, CryptoEngine, type CryptoEngineOptions, DEFAULT_ICE_SERVERS, EventEmitter, FileAssembler, FileChunker, type FileMetadata, MAX_CHUNKS, PQCrypto, PeerConnection, type PeerConnectionOptions, PeerVaultReceiver, PeerVaultSender, type ReceivedFile, type ReceiverOptions, type SenderOptions, SignalingClient, type SignalingMessage, type TransferProgress, type WritableFileSink, createFileSystemSink };
