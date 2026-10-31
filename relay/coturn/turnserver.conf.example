@@ -1,0 +1,23 @@
+# PeerVault TURN relay example. Copy to turnserver.conf and replace secrets.
+listening-port=3478
+tls-listening-port=5349
+fingerprint
+lt-cred-mech
+realm=peervault.example.com
+server-name=peervault.example.com
+
+# Static credentials for a small deployment. For production, use the TURN REST
+# API (use-auth-secret + static-auth-secret) and short-lived credentials.
+user=${TURN_USER}:${TURN_PASSWORD}
+
+# Replace with the relay's public IP. On OCI this is the reserved public IP.
+external-ip=${TURN_PUBLIC_IP}
+
+# Port range opened in the OCI security list / NSG.
+min-port=49152
+max-port=65535
+
+no-cli
+no-multicast-peers
+stale-nonce=600
+no-loopback-peers

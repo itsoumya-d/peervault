@@ -338,6 +338,11 @@ export class PeerVaultSender extends EventEmitter<SenderEvents> {
 
     for (let chunkIndex = 0; chunkIndex < totalChunks && !this.isCancelled; chunkIndex++) {
       await this.sendChunk(file, fileIndex, chunkIndex);
+      // Yield periodically so a 1 GB transfer does not monopolise the event
+      // loop and so short-lived chunk buffers can be collected.
+      if (chunkIndex % 256 === 255) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
 
       const start = chunkIndex * CHUNK_SIZE;
       bytesTransferred += Math.min(CHUNK_SIZE, Math.max(0, file.size - start));
@@ -386,8 +391,11 @@ export class PeerVaultSender extends EventEmitter<SenderEvents> {
     }
 
     const run = this.resendQueue.then(async () => {
-      for (const index of unique) {
-        await this.sendChunk(file, fileIndex, index);
+      for (let offset = 0; offset < unique.length; offset++) {
+        await this.sendChunk(file, fileIndex, unique[offset]);
+        if (offset % 256 === 255) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
       }
       return unique.length;
     });
