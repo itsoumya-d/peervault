@@ -1267,6 +1267,9 @@ var PeerVaultSender = class extends EventEmitter {
     const file = this.files[fileIndex];
     for (let chunkIndex = 0; chunkIndex < totalChunks && !this.isCancelled; chunkIndex++) {
       await this.sendChunk(file, fileIndex, chunkIndex);
+      if (chunkIndex % 256 === 255) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
       const start = chunkIndex * CHUNK_SIZE;
       bytesTransferred += Math.min(CHUNK_SIZE, Math.max(0, file.size - start));
       this.emit("progress", {
@@ -1310,8 +1313,11 @@ var PeerVaultSender = class extends EventEmitter {
       }
     }
     const run = this.resendQueue.then(async () => {
-      for (const index of unique) {
-        await this.sendChunk(file, fileIndex, index);
+      for (let offset = 0; offset < unique.length; offset++) {
+        await this.sendChunk(file, fileIndex, unique[offset]);
+        if (offset % 256 === 255) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
       }
       return unique.length;
     });

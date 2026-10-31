@@ -412,13 +412,14 @@ WebRTC requires a secure context (`wss://`). Deploy the relay behind an SSL-term
 - **Pre-release status.** Not on npm. No production adopters. API may change.
 - **Not independently audited.** ML-KEM-768 is implemented and KAT-tested, but this SDK has not had a third-party security review. Do not treat it as audited production cryptography yet.
 - **Hybrid handshake compatibility.** Both peers must support the PQC handshake. `hybridHandshake: false` keeps interoperability with pre-PQC peers but disables post-quantum protection.
-- **No TURN relay by default — connections fail behind symmetric or carrier-grade NAT.** The default ICE configuration uses three public STUN servers (`stun.l.google.com:19302` x2, `stun.cloudflare.com:3478`) and no TURN server. Pass your own list to fix this:
+- **No TURN relay by default — connections fail behind symmetric or carrier-grade NAT.** See [`docs/coturn.md`](docs/coturn.md) for the OCI/coturn runbook (configuration only; not deployed here). The default ICE configuration uses three public STUN servers (`stun.l.google.com:19302` x2, `stun.cloudflare.com:3478`) and no TURN server. Pass your own list to fix this:
   ```typescript
   new PeerVaultSender(url, { iceServers: [{ urls: 'turn:turn.example.com:3478', username: 'u', credential: 'p' }] });
   ```
   ICE failure now emits an `error` naming the ICE and connection states, and `connect()` rejects instead of hanging.
 - **Resume is manual, not automatic.** The chunk bitmap, `requestMissingChunks()`, and `resendChunks()` primitives are shipped, but the SDK does not persist a transfer journal, auto-reconnect, or re-open the sink for you. Persist `receivedBitmap()`, reopen the sink, reconnect, then request missing chunks.
 - **Streaming to disk is opt-in.** Use `createFileSystemSink()` (File System Access), `createOpfsSink()` (OPFS, Chromium), or `createWritableSink()` for a custom/Node writable. Without a sink the receiver assembles a `Blob` in RAM (~1.5x file size). Sink writes use chunk offsets, so out-of-order delivery is supported. There is no automatic cross-reload resume journal.
+- **Synthetic 1 GB memory result.** `npm run bench:memory` processes a sparse 1 GB file through the sender and a discarding-sink receiver. Receiver peak delta was **3.02 MB RSS**; sender peak delta was **77.45 MB RSS** because the sender allocates one chunk/ciphertext/frame buffer per 64 KB chunk. These are sparse-file/discarding-sink measurements, not a real WebRTC transfer. The receiver path meets the < 32 MB target; the sender path does not claim it.
 - **Protocol compatibility.** The default protocol authenticates the full 21-byte frame header and runs the hybrid handshake. Peers running a pre-AAD or pre-PQC build cannot interoperate with the defaults; upgrade both ends together, or explicitly disable `hybridHandshake` on both sides for the legacy key-only path.
 - **1:1 sessions.** The relay supports one sender and one receiver per room.
 - **Browser environment required** for full operation. `PeerVaultSender` and `PeerVaultReceiver` require `RTCPeerConnection` and `WebSocket`. `PQCrypto` static methods work in Node 24 (has `crypto.subtle`).

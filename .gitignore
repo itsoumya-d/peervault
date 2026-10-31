@@ -5,3 +5,4 @@ dist/*.map
 .DS_Store
 relay/main
 pqc/target/
+relay/coturn/turnserver.conf

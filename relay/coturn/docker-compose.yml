@@ -1,0 +1,11 @@
+services:
+  coturn:
+    image: coturn/coturn:4.6.3
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    # Host networking is required so the advertised relay port range is
+    # reachable. Open 3478/tcp, 3478/udp, 5349/tcp, 5349/udp and
+    # 49152-65535/udp in the cloud firewall.
