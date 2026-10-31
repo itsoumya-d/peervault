@@ -25,7 +25,8 @@
     "build:mlkem": "node scripts/build-mlkem.mjs",
     "bench:pqc": "node scripts/bench-pqc.mjs",
     "bench:throughput": "node scripts/bench-throughput.mjs",
-    "bench:memory": "node --expose-gc scripts/bench-streaming-memory.mjs"
+    "bench:memory": "node --expose-gc scripts/bench-streaming-memory.mjs",
+    "audit:ui": "node ../demo/audit-browser.mjs"
   },
   "keywords": [
     "webrtc",

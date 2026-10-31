@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en" data-df-color-scale="detailed" data-df-density="compact">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>PeerVault — encrypted P2P transfer</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: oklch(0.17 0.012 260);
+      --panel: oklch(0.21 0.014 260);
+      --panel-2: oklch(0.25 0.016 260);
+      --line: oklch(0.34 0.018 260);
+      --line-soft: oklch(0.28 0.016 260);
+      --text: oklch(0.95 0.008 260);
+      --muted: oklch(0.72 0.018 260);
+      --faint: oklch(0.58 0.02 260);
+      --accent: oklch(0.76 0.16 155);
+      --accent-soft: oklch(0.32 0.06 155);
+      --info: oklch(0.78 0.11 245);
+      --info-soft: oklch(0.3 0.05 245);
+      --warn: oklch(0.82 0.14 82);
+      --warn-soft: oklch(0.3 0.05 82);
+      --danger: oklch(0.72 0.19 28);
+      --danger-soft: oklch(0.31 0.07 28);
+      --radius: 10px;
+      --radius-sm: 7px;
+      --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-block-size: 100dvh; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; line-height: 1.45; }
+    body { padding-block-end: env(safe-area-inset-bottom); }
+    h1, h2, h3, p { margin: 0; }
+    h1, h2, h3 { text-wrap: balance; }
+    p { text-wrap: pretty; }
+    button, input { font: inherit; color: inherit; }
+    button, input, .file-label { min-block-size: 44px; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .skip { position: absolute; inset-block-start: -80px; inset-inline-start: 12px; background: var(--accent); color: oklch(0.16 0.02 155); padding: 10px 14px; border-radius: var(--radius-sm); font-weight: 650; }
+    .skip:focus { inset-block-start: 12px; }
+    .topbar { position: sticky; inset-block-start: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px max(16px, env(safe-area-inset-left)) 12px max(16px, env(safe-area-inset-right)); background: var(--bg); border-block-end: 1px solid var(--line-soft); }
+    .brand { display: flex; align-items: center; gap: 10px; min-inline-size: 0; }
+    .mark { display: grid; place-items: center; inline-size: 30px; block-size: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-family: var(--mono); font-weight: 700; font-size: 12px; }
+    .title { font-weight: 680; font-size: 14px; }
+    .sub { color: var(--muted); font-size: 12px; }
+    .badge { display: inline-flex; align-items: center; min-block-size: 22px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-family: var(--mono); font-size: 10.5px; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.92fr); gap: 14px; padding: 16px max(16px, env(safe-area-inset-right)) 32px max(16px, env(safe-area-inset-left)); max-inline-size: 1180px; margin-inline: auto; }
+    .panel { border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--panel); padding: 14px; min-inline-size: 0; }
+    .panel h2 { font-size: 14px; font-weight: 680; margin-block-end: 4px; }
+    .panel .lead { color: var(--muted); font-size: 12px; margin-block-end: 12px; }
+    .tabs { display: flex; gap: 4px; padding: 3px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--bg); margin-block-end: 14px; }
+    .tab { flex: 1; min-block-size: 44px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; font-weight: 620; }
+    .tab[aria-selected="true"] { background: var(--panel-2); color: var(--text); }
+    .field { display: grid; gap: 5px; margin-block-end: 10px; }
+    .field label { color: var(--muted); font-size: 11.5px; }
+    .field input { inline-size: 100%; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); padding: 0 10px; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-2); cursor: pointer; font-weight: 620; }
+    .button:hover { border-color: var(--line); background: oklch(0.3 0.018 260); }
+    .button.primary { background: var(--accent); border-color: var(--accent); color: oklch(0.15 0.02 155); }
+    .button.primary:hover { background: oklch(0.8 0.16 155); }
+    .button.ghost { background: transparent; }
+    .button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .file-drop { display: grid; place-items: center; gap: 6px; text-align: center; border: 1px dashed var(--line); border-radius: var(--radius-sm); background: var(--bg); padding: 18px 12px; color: var(--muted); cursor: pointer; }
+    .file-drop:hover { border-color: var(--accent); color: var(--text); }
+    .file-drop strong { color: var(--text); font-size: 13px; }
+    .file-input { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .file-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 5px; }
+    .file-item { display: flex; justify-content: space-between; gap: 10px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--bg); padding: 7px 9px; font-size: 12px; }
+    .file-item span:first-child { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+    .status { display: flex; align-items: flex-start; gap: 8px; margin-block: 12px 0; font-weight: 600; font-size: 12.5px; }
+    .dot { inline-size: 8px; block-size: 8px; margin-block-start: 5px; border-radius: 50%; background: var(--faint); flex: none; }
+    .status.ok { color: var(--accent); } .status.ok .dot { background: var(--accent); }
+    .status.bad { color: var(--danger); } .status.bad .dot { background: var(--danger); }
+    .status.warn { color: var(--warn); } .status.warn .dot { background: var(--warn); }
+    .status-detail { display: block; color: var(--muted); font-weight: 400; font-size: 12px; margin-block-start: 2px; }
+    .progress { margin-block-start: 12px; }
+    .progress-head { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 11.5px; margin-block-end: 5px; }
+    .bar { block-size: 8px; border-radius: 999px; background: var(--panel-2); overflow: hidden; }
+    .bar > div { block-size: 100%; inline-size: 0; background: var(--accent); transition: inline-size 120ms linear; }
+    .share { margin-block-start: 12px; }
+    .share code { display: block; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line-soft); border-radius: 6px; padding: 9px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+    .notice { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-2); padding: 10px; color: var(--muted); font-size: 12px; }
+    .done-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--bg); padding: 8px 9px; margin-block-start: 6px; font-size: 12px; }
+    .done-item a { color: var(--accent); font-weight: 620; }
+    .pill { display: inline-flex; align-items: center; min-block-size: 20px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); font-size: 10.5px; color: var(--muted); }
+    .pill.ok { color: var(--accent); border-color: oklch(0.42 0.08 155); background: var(--accent-soft); }
+    .pill.info { color: var(--info); border-color: oklch(0.44 0.07 245); background: var(--info-soft); }
+    .hidden { display: none !important; }
+    .sr-only { position: absolute; inline-size: 1px; block-size: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+    @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to transfer</a>
+  <header class="topbar">
+    <div class="brand">
+      <div class="mark" aria-hidden="true">PV</div>
+      <div><div class="title">PeerVault</div><div class="sub">Encrypted browser-to-browser transfer</div></div>
+      <span class="badge">ML-KEM-768 + P-256</span>
+    </div>
+    <div class="row">
+      <button id="demo" class="button ghost" type="button">Run simulated transfer</button>
+      <a class="button" href="../index.html">Docs</a>
+    </div>
+  </header>
+
+  <main id="main" class="layout">
+    <section class="panel" aria-labelledby="transfer-title">
+      <h2 id="transfer-title">Transfer</h2>
+      <p class="lead">The relay sees signaling only. File bytes are encrypted in the sender and decrypted in the receiver.</p>
+      <div class="tabs" role="tablist" aria-label="Transfer mode">
+        <button id="tab-send" class="tab" role="tab" aria-selected="true" aria-controls="panel-send" type="button">Send</button>
+        <button id="tab-receive" class="tab" role="tab" aria-selected="false" aria-controls="panel-receive" type="button">Receive</button>
+      </div>
+
+      <div id="panel-send" role="tabpanel" aria-labelledby="tab-send">
+        <div class="field">
+          <label for="relay-send">Signaling relay</label>
+          <input id="relay-send" value="ws://localhost:4002/ws" autocomplete="off" spellcheck="false">
+        </div>
+        <label class="file-drop" for="files">
+          <strong>Choose files</strong>
+          <span>Encrypted in 64 KB chunks</span>
+        </label>
+        <input id="files" class="file-input" type="file" multiple>
+        <ul id="file-list" class="file-list" aria-label="Selected files"></ul>
+        <div class="row" style="margin-block-start:12px">
+          <button id="create-link" class="button primary" type="button" disabled>Create share link</button>
+          <span class="pill info">hybrid handshake on</span>
+        </div>
+        <div id="share" class="share hidden">
+          <div class="progress-head"><span>Share link</span><button id="copy-link" class="button ghost" type="button">Copy</button></div>
+          <code id="share-link"></code>
+        </div>
+        <p id="send-status" class="status" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span>Waiting for files.<span class="status-detail">Nothing leaves this device until a peer joins.</span></span></p>
+        <div id="send-progress" class="progress hidden">
+          <div class="progress-head"><span>Uploading</span><span id="send-progress-text" class="mono">0%</span></div>
+          <div class="bar"><div id="send-bar"></div></div>
+        </div>
+      </div>
+
+      <div id="panel-receive" role="tabpanel" aria-labelledby="tab-receive" class="hidden">
+        <div class="field">
+          <label for="relay-receive">Signaling relay</label>
+          <input id="relay-receive" value="ws://localhost:4002/ws" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="share-input">Share link or room#key</label>
+          <input id="share-input" placeholder="room-id#base64url-key" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="row">
+          <button id="join" class="button primary" type="button">Join transfer</button>
+          <label class="row" style="gap:6px;color:var(--muted);min-block-size:44px;align-items:center"><input id="stream-disk" type="checkbox"> Stream to disk</label>
+        </div>
+        <p id="receive-status" class="status" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span>Waiting for a share link.<span class="status-detail">Open the link from the sender to prefill this field.</span></span></p>
+        <div id="receive-progress" class="progress hidden">
+          <div class="progress-head"><span>Downloading</span><span id="receive-progress-text" class="mono">0%</span></div>
+          <div class="bar"><div id="receive-bar"></div></div>
+        </div>
+        <div id="received" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <aside class="panel" aria-labelledby="security-title">
+      <h2 id="security-title">Security model</h2>
+      <p class="lead">What this demo actually enforces.</p>
+      <div class="notice">
+        <p><strong>Hybrid key agreement.</strong> ML-KEM-768 (FIPS 203) plus P-256 ECDH, combined with HKDF-SHA256.</p>
+        <p style="margin-block-start:8px"><strong>Authenticated framing.</strong> The full 21-byte header — type, file index, chunk index, and IV — is AES-256-GCM AAD.</p>
+        <p style="margin-block-start:8px"><strong>Chunk-level resume.</strong> The receiver exposes a serializable bitmap; the sender re-reads only missing byte ranges.</p>
+        <p style="margin-block-start:8px"><strong>No server storage.</strong> The relay carries SDP/ICE and room membership, not file bytes.</p>
+      </div>
+      <p class="status ok" style="margin-block-start:12px"><span class="dot" aria-hidden="true"></span><span>Local-first<span class="status-detail">The simulated mode is labeled and never contacts a relay.</span></span></p>
+    </aside>
+  </main>
+
+  <script type="module">
+    const status = (el, tone, text, detail) => {
+      el.className = `status ${tone}`;
+      el.querySelector("span:last-child").firstChild.textContent = text;
+      el.querySelector(".status-detail").textContent = detail || "";
+    };
+    const setProgress = (bar, text, ratio) => {
+      const value = Math.max(0, Math.min(1, ratio));
+      bar.bar.style.inlineSize = `${value * 100}%`;
+      text.textContent = `${Math.round(value * 100)}%`;
+    };
+
+    const els = {
+      tabs: [document.getElementById("tab-send"), document.getElementById("tab-receive")],
+      panels: [document.getElementById("panel-send"), document.getElementById("panel-receive")],
+      files: document.getElementById("files"),
+      fileList: document.getElementById("file-list"),
+      create: document.getElementById("create-link"),
+      share: document.getElementById("share"),
+      shareLink: document.getElementById("share-link"),
+      copy: document.getElementById("copy-link"),
+      sendStatus: document.getElementById("send-status"),
+      sendProgress: document.getElementById("send-progress"),
+      sendBar: document.getElementById("send-bar"),
+      sendText: document.getElementById("send-progress-text"),
+      join: document.getElementById("join"),
+      shareInput: document.getElementById("share-input"),
+      streamDisk: document.getElementById("stream-disk"),
+      receiveStatus: document.getElementById("receive-status"),
+      receiveProgress: document.getElementById("receive-progress"),
+      receiveBar: document.getElementById("receive-bar"),
+      receiveText: document.getElementById("receive-progress-text"),
+      received: document.getElementById("received"),
+      demo: document.getElementById("demo"),
+      relaySend: document.getElementById("relay-send"),
+      relayReceive: document.getElementById("relay-receive")
+    };
+
+    const state = { files: [], sender: null, receiver: null, demo: false };
+
+    function selectTab(index) {
+      els.tabs.forEach((tab, i) => tab.setAttribute("aria-selected", String(i === index)));
+      els.panels.forEach((panel, i) => panel.classList.toggle("hidden", i !== index));
+    }
+    els.tabs.forEach((tab, index) => tab.addEventListener("click", () => selectTab(index)));
+
+    function renderFiles() {
+      els.fileList.innerHTML = state.files.map((file) =>
+        `<li class="file-item"><span>${escapeHtml(file.name)}</span><span class="mono">${formatBytes(file.size)}</span></li>`
+      ).join("");
+      els.create.disabled = state.files.length === 0;
+      if (state.files.length) {
+        status(els.sendStatus, "", "Ready to create a link.", `${state.files.length} file(s), ${formatBytes(totalBytes())} total.`);
+      }
+    }
+
+    function totalBytes() { return state.files.reduce((sum, file) => sum + file.size, 0); }
+    function formatBytes(bytes) {
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+      if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`;
+      return `${(bytes / 1073741824).toFixed(2)} GB`;
+    }
+    function escapeHtml(value) {
+      return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+    }
+
+    els.files.addEventListener("change", () => {
+      state.files = [...els.files.files];
+      renderFiles();
+    });
+
+    els.copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(els.shareLink.textContent);
+        els.copy.textContent = "Copied";
+        setTimeout(() => { els.copy.textContent = "Copy"; }, 900);
+      } catch {
+        els.copy.textContent = "Select manually";
+      }
+    });
+
+    els.create.addEventListener("click", async () => {
+      if (state.demo) return runDemo();
+      try {
+        const { PeerVaultSender } = await import("../sdk/dist/index.mjs");
+        state.sender = new PeerVaultSender(els.relaySend.value.trim());
+        state.sender.addFiles(state.files);
+        state.sender.on("progress", (progress) => {
+          els.sendProgress.classList.remove("hidden");
+          setProgress({ bar: els.sendBar }, els.sendText, progress.bytesTransferred / Math.max(1, progress.totalBytes));
+        });
+        state.sender.on("complete", () => status(els.sendStatus, "ok", "Transfer complete.", "The peer received every authenticated chunk."));
+        state.sender.on("error", (error) => status(els.sendStatus, "bad", "Transfer error.", error.message));
+        status(els.sendStatus, "warn", "Creating room…", "Waiting for the relay to acknowledge create_room.");
+        const link = await state.sender.createShareLink();
+        const url = `${location.origin}${location.pathname}#${link}`;
+        els.shareLink.textContent = url;
+        els.share.classList.remove("hidden");
+        status(els.sendStatus, "ok", "Share link ready.", "Send it to the receiver. File bytes stay peer-to-peer.");
+      } catch (error) {
+        status(els.sendStatus, "bad", "Could not create a transfer.", error.message);
+      }
+    });
+
+    els.join.addEventListener("click", async () => {
+      try {
+        const { PeerVaultReceiver, createFileSystemSink } = await import("../sdk/dist/index.mjs");
+        const share = els.shareInput.value.trim() || location.hash.slice(1);
+        const sinkFactory = els.streamDisk.checked
+          ? (metadata) => createFileSystemSink(metadata.name)
+          : undefined;
+        state.receiver = new PeerVaultReceiver(els.relayReceive.value.trim(), share, {
+          sinkFactory,
+          connectTimeoutMs: 30000
+        });
+        state.receiver.on("progress", (progress) => {
+          els.receiveProgress.classList.remove("hidden");
+          setProgress({ bar: els.receiveBar }, els.receiveText, progress.bytesTransferred / Math.max(1, progress.totalBytes));
+        });
+        state.receiver.on("file_complete", (file) => {
+          const node = document.createElement("div");
+          node.className = "done-item";
+          node.innerHTML = `<span>${escapeHtml(file.name)}</span>${file.streamed ? '<span class="pill ok">saved to disk</span>' : `<a href="${file.url}" download="${escapeHtml(file.name)}">Download</a>`}`;
+          els.received.append(node);
+        });
+        state.receiver.on("complete", () => status(els.receiveStatus, "ok", "All files received.", "AES-GCM tags and declared byte lengths verified."));
+        state.receiver.on("error", (error) => status(els.receiveStatus, "bad", "Receive error.", error.message));
+        status(els.receiveStatus, "warn", "Connecting…", "Joining the room and running the hybrid handshake.");
+        const metadata = await state.receiver.connect();
+        status(els.receiveStatus, "", `Connected to ${metadata.length} file(s).`, "Starting the authenticated download.");
+        await state.receiver.download();
+      } catch (error) {
+        status(els.receiveStatus, "bad", "Could not join.", error.message);
+      }
+    });
+
+    function runDemo() {
+      state.demo = true;
+      els.create.disabled = true;
+      els.shareLink.textContent = `${location.origin}${location.pathname}#demo-room#demo-key`;
+      els.share.classList.remove("hidden");
+      els.sendProgress.classList.remove("hidden");
+      status(els.sendStatus, "warn", "Simulated transfer running.", "No relay or file bytes are used in this mode.");
+      const started = performance.now();
+      const total = 256 * 1024 * 1024;
+      const timer = setInterval(() => {
+        const ratio = Math.min(1, (performance.now() - started) / 1800);
+        setProgress({ bar: els.sendBar }, els.sendText, ratio);
+        if (ratio >= 1) {
+          clearInterval(timer);
+          status(els.sendStatus, "ok", "Simulation complete.", "This state is illustrative; the real path is the Send flow.");
+          els.create.disabled = false;
+          state.demo = false;
+        }
+      }, 80);
+    }
+    els.demo.addEventListener("click", runDemo);
+
+    if (location.hash.length > 1) {
+      els.shareInput.value = location.hash.slice(1);
+      selectTab(1);
+      status(els.receiveStatus, "", "Share link loaded.", "Review the relay URL and join.");
+    }
+  </script>
+</body>
+</html>
