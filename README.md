@@ -297,6 +297,7 @@ WebRTC requires a secure context (`wss://`). Deploy the relay behind an SSL-term
   ICE failure now emits an `error` naming the ICE and connection states, and `connect()` rejects instead of hanging.
 - **Transfers are not resumable.** If either tab closes the transfer must restart from the beginning. There is no chunk re-request protocol and no persisted state.
 - **Streaming to disk is opt-in and Chromium-only.** Pass a `sinkFactory` using `createFileSystemSink()` (File System Access API) to write chunks directly to a user-selected file; otherwise the receiver assembles a `Blob` in RAM (measured peak ~1.5x file size). Sink writes use chunk offsets, so out-of-order delivery is supported. There is no resume across page reloads or persisted transfer state.
+- **Protocol compatibility.** Frame headers are authenticated with AES-GCM AAD. Peers running a pre-AAD build cannot decrypt these frames; upgrade both ends together.
 - **1:1 sessions.** The relay supports one sender and one receiver per room.
 - **Browser environment required** for full operation. `PeerVaultSender` and `PeerVaultReceiver` require `RTCPeerConnection` and `WebSocket`. `PQCrypto` static methods work in Node 24 (has `crypto.subtle`).
 
