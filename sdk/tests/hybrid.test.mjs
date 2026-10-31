@@ -71,30 +71,32 @@ describe('bundled ML-KEM-768 wasm core', () => {
 
   test('interoperates with the platform ML-KEM implementation when present', async (t) => {
     if (!globalThis.crypto?.subtle) return t.skip('WebCrypto unavailable');
-    let imported;
     try {
-      const kem = await MlKem768.load();
-      const keyPair = kem.generateKeyPair();
-      imported = await crypto.subtle.importKey(
-        'raw-public',
-        keyPair.publicKey,
+      await crypto.subtle.generateKey(
         { name: 'ML-KEM-768' },
         true,
-        ['encapsulateBits']
+        ['encapsulateBits', 'decapsulateBits']
       );
-      const foreign = await crypto.subtle.encapsulateBits(
-        { name: 'ML-KEM-768' },
-        imported
-      );
-      const ours = kem.decapsulate(new Uint8Array(foreign.ciphertext), keyPair.secretKey);
-      assert.equal(ours.valid, true);
-      assert.ok(Buffer.from(ours.sharedSecret).equals(Buffer.from(foreign.sharedKey)));
-    } catch (error) {
-      if (error && (error.name === 'NotSupportedError' || error.message?.includes('ML-KEM'))) {
-        return t.skip('platform does not implement ML-KEM-768');
-      }
-      throw error;
+    } catch {
+      return t.skip('platform does not implement ML-KEM-768');
     }
+
+    const kem = await MlKem768.load();
+    const keyPair = kem.generateKeyPair();
+    const imported = await crypto.subtle.importKey(
+      'raw-public',
+      keyPair.publicKey,
+      { name: 'ML-KEM-768' },
+      true,
+      ['encapsulateBits']
+    );
+    const foreign = await crypto.subtle.encapsulateBits(
+      { name: 'ML-KEM-768' },
+      imported
+    );
+    const ours = kem.decapsulate(new Uint8Array(foreign.ciphertext), keyPair.secretKey);
+    assert.equal(ours.valid, true);
+    assert.ok(Buffer.from(ours.sharedSecret).equals(Buffer.from(foreign.sharedKey)));
   });
 });
 
