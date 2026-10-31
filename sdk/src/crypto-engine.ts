@@ -1,16 +1,13 @@
-// Copyright (c) 2024-2026 Soumya Debnath. All Rights Reserved.
-// Licensed under the Business Source License 1.1 (BSL 1.1).
-// See LICENSE file for details. Production use requires a paid license.
-// Contact: soumyadebnath1619@gmail.com
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2024-2026 Soumya Debnath
 
 import { PQCrypto, CryptoCapabilities } from './pq-crypto';
 
 export interface CryptoEngineOptions {
   /**
-   * @deprecated No hybrid key exchange exists in PeerVault. This flag is retained
-   * for API compatibility and has no effect; key agreement is always classical
-   * P-256 ECDH, and the file-transfer path uses a random AES-256-GCM key carried in
-   * the share link fragment.
+   * @deprecated Hybrid key exchange is configured on PeerVaultSender and
+   * PeerVaultReceiver (`hybridHandshake`, default true). This flag is retained
+   * for API compatibility and has no effect.
    */
   useHybridKeyExchange?: boolean;
 }
@@ -18,29 +15,28 @@ export interface CryptoEngineOptions {
 export class CryptoEngine {
   private key: CryptoKey | null = null;
   private localKeyPair: CryptoKeyPair | null = null;
+  private rawKey: Uint8Array | null = null;
+  private hybridEstablished = false;
   /**
-   * @deprecated Always false. Previously defaulted to `PQCrypto.isMLKEMSupported()`,
-   * which returned true in every modern browser and told applications that a hybrid
-   * post-quantum exchange was in use when none was implemented.
+   * @deprecated Always false. Hybrid handshakes are configured on the sender and
+   * receiver (default true); check `getCapabilities().usesPostQuantumKeyExchange`
+   * after connecting to see whether one actually completed.
    */
   public readonly useHybridKeyExchange: boolean = false;
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   constructor(_options?: CryptoEngineOptions) {
-    // useHybridKeyExchange is intentionally fixed at false; see the field docs.
+    // Hybrid key exchange is a peer-level concern; see the field docs.
   }
 
-  /**
-   * Reports what this engine actually does. `supportsMLKEM` describes the platform,
-   * not PeerVault: `usesPostQuantumKeyExchange` is always false.
-   */
+  /** Reports the primitives this engine can run and whether a hybrid session is live. */
   getCapabilities(): CryptoCapabilities {
     const hasSubtle = typeof crypto !== 'undefined' && !!crypto.subtle;
     return {
       supportsMLKEM: PQCrypto.isMLKEMSupported(),
       supportsECDH: hasSubtle,
       supportsAESGCM: hasSubtle,
-      usesPostQuantumKeyExchange: false,
+      usesPostQuantumKeyExchange: this.hybridEstablished,
     };
   }
 
@@ -52,11 +48,13 @@ export class CryptoEngine {
     );
 
     const rawKey = await crypto.subtle.exportKey('raw', this.key);
+    this.rawKey = new Uint8Array(rawKey.slice(0));
     return this.bufferToBase64Url(rawKey);
   }
 
   async importKey(base64UrlKey: string): Promise<void> {
     const rawKey = this.base64UrlToBuffer(base64UrlKey);
+    this.rawKey = new Uint8Array(rawKey.slice(0));
     this.key = await crypto.subtle.importKey(
       'raw',
       rawKey,
@@ -64,6 +62,41 @@ export class CryptoEngine {
       false,
       ['encrypt', 'decrypt']
     );
+  }
+
+  /** The share-link key bytes. Used as the pre-shared authentication secret. */
+  getRawKey(): Uint8Array {
+    if (!this.rawKey) throw new Error('Key not initialized');
+    return this.rawKey.slice();
+  }
+
+  /**
+   * Derives and installs the transfer key:
+   * HKDF-SHA256(share_link_key || hybrid_session, salt = transcript_hash,
+   *             info = "peervault/file-key/v1")
+   */
+  async deriveHybridTransferKey(sessionKey: Uint8Array, transcriptHash: Uint8Array): Promise<void> {
+    if (!this.rawKey) throw new Error('Key not initialized');
+    const ikm = new Uint8Array(this.rawKey.byteLength + sessionKey.byteLength);
+    ikm.set(this.rawKey, 0);
+    ikm.set(sessionKey, this.rawKey.byteLength);
+
+    const hkdfKey = await crypto.subtle.importKey('raw', ikm, { name: 'HKDF' }, false, [
+      'deriveKey',
+    ]);
+    this.key = await crypto.subtle.deriveKey(
+      {
+        name: 'HKDF',
+        hash: 'SHA-256',
+        salt: new Uint8Array(transcriptHash),
+        info: new TextEncoder().encode('peervault/file-key/v1'),
+      },
+      hkdfKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+    this.hybridEstablished = true;
   }
 
   async getLocalPublicKey(): Promise<string> {
@@ -84,11 +117,15 @@ export class CryptoEngine {
 
   async encryptChunk(
     data: ArrayBuffer,
-    additionalData?: Uint8Array
+    additionalData?: Uint8Array,
+    providedIv?: Uint8Array
   ): Promise<{ iv: Uint8Array; ciphertext: ArrayBuffer }> {
     if (!this.key) throw new Error('Key not initialized');
 
-    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const iv = providedIv
+      ? new Uint8Array(providedIv)
+      : crypto.getRandomValues(new Uint8Array(12));
+    if (iv.byteLength !== 12) throw new Error('AES-GCM nonce must be 12 bytes');
     const aad = additionalData ? new Uint8Array(additionalData) : undefined;
     const ciphertext = await crypto.subtle.encrypt(
       aad ? { name: 'AES-GCM', iv, additionalData: aad } : { name: 'AES-GCM', iv },

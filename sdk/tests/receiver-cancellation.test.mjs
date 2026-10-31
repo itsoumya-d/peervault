@@ -49,6 +49,8 @@ async function receiverFixture(t) {
   const receiver = new PeerVaultReceiver('wss://relay.invalid/ws', `room#${key}`, {
     connectTimeoutMs: 1000,
     iceServers: [],
+    // These tests drive metadata directly, without a live sender handshake.
+    hybridHandshake: false,
   });
   t.after(() => receiver.cancel());
   const events = [];
@@ -78,19 +80,21 @@ async function receiverFixture(t) {
     await connecting;
     const frames = [];
     for (let i = 0; i < parts.length; i++) {
-      const header = new Uint8Array(9);
+      const iv = new Uint8Array(12).fill(i + 1);
+      const header = new Uint8Array(21);
       const headerView = new DataView(header.buffer);
       headerView.setUint8(0, 1);
       headerView.setUint32(1, 0, true);
       headerView.setUint32(5, i, true);
+      header.set(iv, 9);
 
-      const { iv, ciphertext } = await sender.encryptChunk(
+      const { ciphertext } = await sender.encryptChunk(
         Uint8Array.from(parts[i]).buffer,
-        header
+        header,
+        iv
       );
       const frame = new ArrayBuffer(21 + ciphertext.byteLength);
       new Uint8Array(frame).set(header, 0);
-      new Uint8Array(frame).set(iv, 9);
       new Uint8Array(frame).set(new Uint8Array(ciphertext), 21);
       frames.push(frame);
     }

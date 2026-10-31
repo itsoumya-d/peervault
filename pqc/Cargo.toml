@@ -1,0 +1,15 @@
+[package]
+name = "peervault-mlkem768"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "FIPS 203 ML-KEM-768 lattice KEM core for PeerVault"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

@@ -220,16 +220,17 @@ describe('FileAssembler adversarial cases', () => {
   });
 });
 
-describe('Post-quantum claims match the implementation', () => {
-  test('isMLKEMSupported() does not claim post-quantum protection', () => {
-    // It previously returned true for any environment exposing crypto.subtle,
-    // which told applications ML-KEM was in use when no lattice code exists.
-    assert.equal(PQCrypto.isMLKEMSupported(), false);
+describe('Post-quantum capabilities match the implementation', () => {
+  test('isMLKEMSupported() reflects the bundled wasm implementation', () => {
+    // PeerVault now bundles a FIPS 203 ML-KEM-768 core compiled to wasm; this
+    // reports that it can execute here, not that a handshake has happened yet.
+    assert.equal(PQCrypto.isMLKEMSupported(), typeof WebAssembly !== 'undefined');
   });
 
-  test('getCapabilities() reports classical key exchange', () => {
+  test('getCapabilities() starts with no completed hybrid exchange', () => {
     const caps = new CryptoEngine().getCapabilities();
     assert.equal(caps.usesPostQuantumKeyExchange, false);
+    assert.equal(caps.supportsMLKEM, typeof WebAssembly !== 'undefined');
     assert.equal(caps.supportsAESGCM, true);
     assert.equal(caps.supportsECDH, true);
   });
@@ -252,7 +253,7 @@ describe('Post-quantum claims match the implementation', () => {
   test('probeMLKEM() is a real feature probe and returns a boolean', async () => {
     const supported = await PQCrypto.probeMLKEM();
     assert.equal(typeof supported, 'boolean');
-    // Node 24 does implement ML-KEM-768 in WebCrypto, but PeerVault never uses it.
+    // A platform probe is not a completed PeerVault handshake.
     assert.equal(new CryptoEngine().getCapabilities().usesPostQuantumKeyExchange, false);
   });
 });

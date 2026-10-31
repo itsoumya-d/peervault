@@ -1,12 +1,11 @@
-// Copyright (c) 2024-2026 Soumya Debnath. All Rights Reserved.
-// Licensed under the Business Source License 1.1 (BSL 1.1).
-// See LICENSE file for details. Production use requires a paid license.
-// Contact: soumyadebnath1619@gmail.com
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2024-2026 Soumya Debnath
 
 import { EventEmitter } from './events';
 import { SignalingClient } from './signaling-client';
 import { PeerConnection } from './peer-connection';
 import { CryptoEngine } from './crypto-engine';
+import { HybridHandshake } from './hybrid-handshake';
 import { FileChunker, CHUNK_SIZE } from './file-chunker';
 import { FileMetadata, TransferProgress, SignalingMessage } from './types';
 
@@ -36,6 +35,13 @@ export interface SenderOptions {
    * before aborting with an error. Pass 0 to wait indefinitely (previous behaviour).
    */
   stallTimeoutMs?: number;
+  /**
+   * Run the ML-KEM-768 + P-256 hybrid handshake before sending metadata and
+   * chunks. Default true. Set false only for interoperability with older peers.
+   */
+  hybridHandshake?: boolean;
+  /** Milliseconds to wait for the receiver's hybrid hello/ready. Default 15s. */
+  handshakeTimeoutMs?: number;
 }
 
 const MAX_BUFFERED_BYTES = 1024 * 1024 * 16;
@@ -53,6 +59,14 @@ export class PeerVaultSender extends EventEmitter<SenderEvents> {
   private createRoomTimeoutMs: number;
   private stallTimeoutMs: number;
   private iceServers?: RTCIceServer[];
+  private hybridHandshakeEnabled: boolean;
+  private handshakeTimeoutMs: number;
+  private handshake: HybridHandshake | null = null;
+  private handshakeInit: Promise<HybridHandshake> | null = null;
+  private handshakePromise: Promise<void> = Promise.resolve();
+  private handshakeResolve: (() => void) | null = null;
+  private handshakeReject: ((error: Error) => void) | null = null;
+  private handshakeTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(signalingUrl: string, options?: SenderOptions) {
     super();
@@ -61,6 +75,8 @@ export class PeerVaultSender extends EventEmitter<SenderEvents> {
     this.iceServers = options?.iceServers;
     this.createRoomTimeoutMs = options?.createRoomTimeoutMs ?? 30_000;
     this.stallTimeoutMs = options?.stallTimeoutMs ?? 120_000;
+    this.hybridHandshakeEnabled = options?.hybridHandshake ?? true;
+    this.handshakeTimeoutMs = options?.handshakeTimeoutMs ?? 15_000;
 
     this.signaling.on('message', (msg: SignalingMessage) => {
       if (msg.type === 'room_created' && msg.roomId) {
@@ -166,7 +182,11 @@ export class PeerVaultSender extends EventEmitter<SenderEvents> {
 
     this.peerConnection.on('datachannel_open', (dc: RTCDataChannel) => {
       this.dc = dc;
-      this.startTransfer();
+      dc.onmessage = (event: MessageEvent) => {
+        if (typeof event.data === 'string') this.handleControlMessage(event.data);
+      };
+      this.handshakePromise = this.beginHybridHandshake();
+      void this.startTransfer();
     });
 
     this.peerConnection.on('error', (err: Error) => {
@@ -174,10 +194,101 @@ export class PeerVaultSender extends EventEmitter<SenderEvents> {
     });
   }
 
+  private async beginHybridHandshake(): Promise<void> {
+    if (!this.hybridHandshakeEnabled) return;
+
+    this.handshakeInit = HybridHandshake.create('sender', this.cryptoEngine.getRawKey());
+    const handshake = await this.handshakeInit;
+    this.handshake = handshake;
+
+    await new Promise<void>((resolve, reject) => {
+      this.handshakeResolve = resolve;
+      this.handshakeReject = reject;
+      if (this.handshakeTimeoutMs > 0) {
+        this.handshakeTimer = setTimeout(() => {
+          this.failHandshake(
+            new Error(
+              `PeerVault: hybrid handshake timed out after ${this.handshakeTimeoutMs}ms`
+            )
+          );
+        }, this.handshakeTimeoutMs);
+      }
+    });
+  }
+
+  private handleControlMessage(raw: string): void {
+    let message: { type?: unknown };
+    try {
+      message = JSON.parse(raw) as { type?: unknown };
+    } catch {
+      this.emit('error', new Error('PeerVault: peer sent an invalid JSON control message'));
+      return;
+    }
+
+    if (message.type === 'pv-hybrid-hello') {
+      void this.handleHybridHello(raw);
+    } else if (message.type === 'pv-hybrid-ready') {
+      void this.handleHybridReady(raw);
+    }
+  }
+
+  private async handleHybridHello(raw: string): Promise<void> {
+    try {
+      const handshake =
+        this.handshake ?? (this.handshakeInit ? await this.handshakeInit : null);
+      if (!handshake) throw new Error('PeerVault: received a hybrid hello before setup');
+      const finish = await handshake.acceptHello(raw);
+      await this.cryptoEngine.deriveHybridTransferKey(handshake.session, handshake.transcript);
+      if (!this.dc || this.dc.readyState !== 'open') {
+        throw new Error('DataChannel closed during the hybrid handshake');
+      }
+      this.dc.send(finish);
+    } catch (error) {
+      this.failHandshake(toError(error, 'PeerVault: hybrid handshake failed'));
+    }
+  }
+
+  private async handleHybridReady(raw: string): Promise<void> {
+    try {
+      const handshake =
+        this.handshake ?? (this.handshakeInit ? await this.handshakeInit : null);
+      if (!handshake) throw new Error('PeerVault: received hybrid ready before setup');
+      await handshake.acceptReady(raw);
+      this.resolveHandshake();
+    } catch (error) {
+      this.failHandshake(toError(error, 'PeerVault: hybrid key confirmation failed'));
+    }
+  }
+
+  private resolveHandshake(): void {
+    if (this.handshakeTimer) {
+      clearTimeout(this.handshakeTimer);
+      this.handshakeTimer = null;
+    }
+    const resolve = this.handshakeResolve;
+    this.handshakeResolve = null;
+    this.handshakeReject = null;
+    if (resolve) resolve();
+  }
+
+  private failHandshake(error: Error): void {
+    if (this.handshakeTimer) {
+      clearTimeout(this.handshakeTimer);
+      this.handshakeTimer = null;
+    }
+    const reject = this.handshakeReject;
+    this.handshakeResolve = null;
+    this.handshakeReject = null;
+    if (reject) reject(error);
+    else this.emit('error', error);
+  }
+
   private async startTransfer() {
     if (!this.dc) return;
 
     try {
+      await this.handshakePromise;
+
       // Chunk counts must come from the chunker: a zero-byte file still sends one
       // (empty) chunk, so Math.ceil(0 / CHUNK_SIZE) === 0 left the receiver waiting
       // for a chunk count it could never reconcile.
@@ -224,21 +335,22 @@ export class PeerVaultSender extends EventEmitter<SenderEvents> {
 
       // Binary message format:
       // [1 byte: type (1)] [4 bytes: fileIndex] [4 bytes: chunkIndex] [12 bytes: IV] [rest: ciphertext]
-      // The first 9 bytes are authenticated as AES-GCM additional data, so a
-      // receiver cannot be tricked into reassigning a valid ciphertext to a
-      // different file or chunk index.
-      const header = new Uint8Array(9);
+      // The full 21-byte header, including the IV, is authenticated as AES-GCM
+      // additional data. A tampered file index, chunk index, or IV therefore
+      // fails decryption before anything is written.
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const header = new Uint8Array(21);
       const headerView = new DataView(header.buffer);
       headerView.setUint8(0, 1);
       headerView.setUint32(1, fileIndex, true); // Little endian
       headerView.setUint32(5, chunkIndex, true);
+      header.set(iv, 9);
 
-      const { iv, ciphertext } = await this.cryptoEngine.encryptChunk(chunkData, header);
+      const { ciphertext } = await this.cryptoEngine.encryptChunk(chunkData, header, iv);
 
       const buffer = new ArrayBuffer(21 + ciphertext.byteLength);
       const u8 = new Uint8Array(buffer);
       u8.set(header, 0);
-      u8.set(iv, 9);
       u8.set(new Uint8Array(ciphertext), 21);
 
       await this.waitForDrain();

@@ -68,6 +68,13 @@ interface SenderOptions {
      * before aborting with an error. Pass 0 to wait indefinitely (previous behaviour).
      */
     stallTimeoutMs?: number;
+    /**
+     * Run the ML-KEM-768 + P-256 hybrid handshake before sending metadata and
+     * chunks. Default true. Set false only for interoperability with older peers.
+     */
+    hybridHandshake?: boolean;
+    /** Milliseconds to wait for the receiver's hybrid hello/ready. Default 15s. */
+    handshakeTimeoutMs?: number;
 }
 declare class PeerVaultSender extends EventEmitter<SenderEvents> {
     private signaling;
@@ -82,6 +89,14 @@ declare class PeerVaultSender extends EventEmitter<SenderEvents> {
     private createRoomTimeoutMs;
     private stallTimeoutMs;
     private iceServers?;
+    private hybridHandshakeEnabled;
+    private handshakeTimeoutMs;
+    private handshake;
+    private handshakeInit;
+    private handshakePromise;
+    private handshakeResolve;
+    private handshakeReject;
+    private handshakeTimer;
     constructor(signalingUrl: string, options?: SenderOptions);
     addFiles(files: File[]): void;
     /**
@@ -94,6 +109,12 @@ declare class PeerVaultSender extends EventEmitter<SenderEvents> {
     createShareLink(): Promise<string>;
     private doCreateShareLink;
     private setupPeerConnection;
+    private beginHybridHandshake;
+    private handleControlMessage;
+    private handleHybridHello;
+    private handleHybridReady;
+    private resolveHandshake;
+    private failHandshake;
     private startTransfer;
     private transferFile;
     /**
@@ -106,35 +127,27 @@ declare class PeerVaultSender extends EventEmitter<SenderEvents> {
 }
 
 /**
- * IMPORTANT — PeerVault does NOT implement post-quantum cryptography.
+ * PeerVault ships a FIPS 203 ML-KEM-768 implementation compiled from Rust to
+ * WebAssembly (`src/mlkem.ts`). The protocol runs a hybrid handshake that mixes
+ * ML-KEM-768, P-256 ECDH and HKDF-SHA256; see `hybrid-handshake.ts`.
  *
- * This module provides classical P-256 ECDH + HKDF-SHA-256 primitives. There is no
- * ML-KEM / Kyber lattice implementation anywhere in this package: no NTT, no
- * polynomial arithmetic mod q=3329, no CBD sampling, no FIPS 203 encapsulation.
- *
- * `supportsMLKEM` therefore reports whether ML-KEM is available on the *platform*,
- * never whether PeerVault protects your data with it. It does not. The effective
- * construction for a file transfer is a random AES-256-GCM key carried in the share
- * link's URL fragment. See the README section "Cryptography — What the Code Actually Does".
+ * The helpers below cover the classical and HKDF primitives used by that
+ * handshake. `probeMLKEM()` remains available for callers that want to know
+ * whether the host platform's WebCrypto exposes its own ML-KEM implementation.
  */
 interface CryptoCapabilities {
-    /**
-     * Whether the host platform exposes ML-KEM through WebCrypto.
-     * PeerVault does not use ML-KEM even when this is true.
-     */
+    /** Whether PeerVault's bundled ML-KEM-768 wasm implementation can run here. */
     supportsMLKEM: boolean;
     supportsECDH: boolean;
     supportsAESGCM: boolean;
-    /** Always false: PeerVault's key agreement is classical ECDH, never hybrid. */
+    /** True only after a hybrid ML-KEM-768 + P-256 handshake has completed. */
     usesPostQuantumKeyExchange: boolean;
 }
 declare class PQCrypto {
     /**
-     * @deprecated Misleading and never accurate. This used to return true for any
-     * environment that merely exposed `crypto.subtle.generateKey`, which made every
-     * modern browser report post-quantum support that does not exist. It now returns
-     * false unconditionally because PeerVault performs no ML-KEM operations.
-     * Use {@link probeMLKEM} if you want to know what the platform supports.
+     * Reports whether PeerVault's bundled ML-KEM-768 wasm core can execute here.
+     * This is about the implementation PeerVault actually uses, not a claim about
+     * the host platform's WebCrypto surface. Use {@link probeMLKEM} for that.
      */
     static isMLKEMSupported(): boolean;
     /**
@@ -149,24 +162,24 @@ declare class PQCrypto {
     static probeMLKEM(): Promise<boolean>;
     /**
      * Generates the classical P-256 ECDH key pair, plus a platform ML-KEM-768 key
-     * pair when one is available.
+     * pair when WebCrypto exposes one.
      *
-     * The returned `mlkem` key pair is NOT used by PeerVault: no encapsulation is
-     * performed and its shared secret is never mixed into the HKDF input. It is
-     * exposed only so that callers can build their own hybrid construction. Treat a
-     * present `mlkem` field as "the platform has ML-KEM", never as "this transfer is
-     * post-quantum secure".
+     * PeerVault's default handshake does not use this platform key pair; it uses
+     * the bundled wasm ML-KEM implementation in `hybrid-handshake.ts`. This helper
+     * is retained for callers building their own constructions.
      */
     static generateHybridKeyPair(): Promise<{
         ecdh: CryptoKeyPair;
         mlkem?: CryptoKeyPair;
     }>;
     /**
-     * Plain P-256 ECDH derivation. Kept under its original name for compatibility.
-     * Despite the name this is NOT hybrid and NOT post-quantum.
-     * @see ecdhKeyExchange
+     * Derives the hybrid session secret.
+     *
+     * With no `mlkemSharedSecret`, this is the legacy plain P-256 ECDH behaviour.
+     * With an ML-KEM shared secret, it concatenates the ECDH and KEM secrets and
+     * runs HKDF-SHA256 with the supplied transcript hash as salt.
      */
-    static hybridKeyExchange(localPrivate: CryptoKey, remotePublic: CryptoKey): Promise<ArrayBuffer>;
+    static hybridKeyExchange(localPrivate: CryptoKey, remotePublic: CryptoKey, mlkemSharedSecret?: ArrayBuffer, transcriptHash?: ArrayBuffer): Promise<ArrayBuffer>;
     /** P-256 ECDH shared secret (256 bits). Accurately named replacement. */
     static ecdhKeyExchange(localPrivate: CryptoKey, remotePublic: CryptoKey): Promise<ArrayBuffer>;
     static deriveSharedKey(sharedSecret: ArrayBuffer, salt?: ArrayBuffer, contextInfo?: string): Promise<CryptoKey>;
@@ -179,33 +192,39 @@ declare class PQCrypto {
 
 interface CryptoEngineOptions {
     /**
-     * @deprecated No hybrid key exchange exists in PeerVault. This flag is retained
-     * for API compatibility and has no effect; key agreement is always classical
-     * P-256 ECDH, and the file-transfer path uses a random AES-256-GCM key carried in
-     * the share link fragment.
+     * @deprecated Hybrid key exchange is configured on PeerVaultSender and
+     * PeerVaultReceiver (`hybridHandshake`, default true). This flag is retained
+     * for API compatibility and has no effect.
      */
     useHybridKeyExchange?: boolean;
 }
 declare class CryptoEngine {
     private key;
     private localKeyPair;
+    private rawKey;
+    private hybridEstablished;
     /**
-     * @deprecated Always false. Previously defaulted to `PQCrypto.isMLKEMSupported()`,
-     * which returned true in every modern browser and told applications that a hybrid
-     * post-quantum exchange was in use when none was implemented.
+     * @deprecated Always false. Hybrid handshakes are configured on the sender and
+     * receiver (default true); check `getCapabilities().usesPostQuantumKeyExchange`
+     * after connecting to see whether one actually completed.
      */
     readonly useHybridKeyExchange: boolean;
     constructor(_options?: CryptoEngineOptions);
-    /**
-     * Reports what this engine actually does. `supportsMLKEM` describes the platform,
-     * not PeerVault: `usesPostQuantumKeyExchange` is always false.
-     */
+    /** Reports the primitives this engine can run and whether a hybrid session is live. */
     getCapabilities(): CryptoCapabilities;
     generateKey(): Promise<string>;
     importKey(base64UrlKey: string): Promise<void>;
+    /** The share-link key bytes. Used as the pre-shared authentication secret. */
+    getRawKey(): Uint8Array;
+    /**
+     * Derives and installs the transfer key:
+     * HKDF-SHA256(share_link_key || hybrid_session, salt = transcript_hash,
+     *             info = "peervault/file-key/v1")
+     */
+    deriveHybridTransferKey(sessionKey: Uint8Array, transcriptHash: Uint8Array): Promise<void>;
     getLocalPublicKey(): Promise<string>;
     negotiateKey(remotePeerPublicKey: string): Promise<void>;
-    encryptChunk(data: ArrayBuffer, additionalData?: Uint8Array): Promise<{
+    encryptChunk(data: ArrayBuffer, additionalData?: Uint8Array, providedIv?: Uint8Array): Promise<{
         iv: Uint8Array;
         ciphertext: ArrayBuffer;
     }>;
@@ -240,9 +259,9 @@ declare class FileAssembler {
      * Decrypt and store one chunk. Resolves true once every distinct chunk index
      * in [0, metadata.chunks) has been received.
      *
-     * `additionalData` must be the 9-byte frame header (type, fileIndex,
-     * chunkIndex). Binding it to AES-GCM prevents a valid ciphertext from being
-     * replayed under a different file or chunk index.
+     * `additionalData` must be the full 21-byte frame header (type, fileIndex,
+     * chunkIndex, IV). Binding it to AES-GCM prevents a valid ciphertext from
+     * being replayed under a different file, chunk index, or IV.
      *
      * Duplicate and out-of-range indices are rejected rather than counted. When a
      * sink is attached, plaintext is written straight to disk and never retained
@@ -295,6 +314,13 @@ interface ReceiverOptions {
      * picker from the user gesture that starts the transfer.
      */
     sinkFactory?: (metadata: FileMetadata, fileIndex: number) => Promise<WritableFileSink | null>;
+    /**
+     * Run the ML-KEM-768 + P-256 hybrid handshake before accepting metadata.
+     * Default true. Set false only for interoperability with older senders.
+     */
+    hybridHandshake?: boolean;
+    /** Milliseconds to wait for the sender's hybrid finish. Default 15s. */
+    handshakeTimeoutMs?: number;
 }
 declare class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     private signaling;
@@ -306,6 +332,10 @@ declare class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     private connectTimeoutMs;
     private iceServers?;
     private sinkFactory?;
+    private hybridHandshakeEnabled;
+    private handshakeTimeoutMs;
+    private handshake;
+    private handshakeTimer;
     private metadataList;
     private assemblers;
     private isDownloading;
@@ -327,6 +357,8 @@ declare class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     private clearConnectTimer;
     download(): Promise<void>;
     private setupDataChannel;
+    private beginHybridHandshake;
+    private handleHybridFinish;
     private handleControlMessage;
     private setupFiles;
     private enqueueChunk;
@@ -334,6 +366,81 @@ declare class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     private tryFinishFile;
     cancel(): void;
     private throwIfCancelled;
+}
+
+declare const MLKEM768_PUBLIC_KEY_BYTES = 1184;
+declare const MLKEM768_SECRET_KEY_BYTES = 2400;
+declare const MLKEM768_CIPHERTEXT_BYTES = 1088;
+declare const MLKEM768_SHARED_SECRET_BYTES = 32;
+declare const MLKEM768_SEED_BYTES = 64;
+interface MlKem768KeyPair {
+    publicKey: Uint8Array;
+    secretKey: Uint8Array;
+}
+interface MlKem768Encapsulation {
+    ciphertext: Uint8Array;
+    sharedSecret: Uint8Array;
+}
+interface MlKem768Decapsulation {
+    sharedSecret: Uint8Array;
+    /** False when decapsulation hit the FIPS 203 implicit-rejection path. */
+    valid: boolean;
+}
+declare const textEncoder: TextEncoder;
+declare class MlKem768 {
+    private readonly exports;
+    private readonly workspaceOffset;
+    private readonly seedOffset;
+    private readonly publicKeyOffset;
+    private readonly secretKeyOffset;
+    private readonly messageOffset;
+    private readonly ciphertextOffset;
+    private readonly sharedSecretOffset;
+    private constructor();
+    static load(): Promise<MlKem768>;
+    private static instantiate;
+    private view;
+    generateKeyPair(seed?: Uint8Array): MlKem768KeyPair;
+    encapsulate(publicKey: Uint8Array, message?: Uint8Array): MlKem768Encapsulation;
+    decapsulate(ciphertext: Uint8Array, secretKey: Uint8Array): MlKem768Decapsulation;
+}
+
+type HybridRole = 'sender' | 'receiver';
+interface HybridHandshakeJSON {
+    type: string;
+    v: number;
+    [key: string]: unknown;
+}
+declare function bytesToBase64Url(bytes: Uint8Array): string;
+declare function base64UrlToBytes(value: string): Uint8Array;
+declare class HybridHandshake {
+    private readonly role;
+    private readonly shareLinkKey;
+    private readonly kem;
+    private ecdhKeyPair;
+    private ecdhPublic;
+    private mlkemKeyPair;
+    private mlkemPublic;
+    private nonce;
+    private helloCanonical;
+    private sessionKeyBytes;
+    private transcriptHashBytes;
+    private confirmB64;
+    private ready;
+    private constructor();
+    static create(role: HybridRole, shareLinkKey: Uint8Array): Promise<HybridHandshake>;
+    get isReady(): boolean;
+    get session(): Uint8Array;
+    get transcript(): Uint8Array;
+    /** Receiver -> sender. */
+    createHello(): Promise<string>;
+    /** Sender receives the hello and returns the finish message. */
+    acceptHello(raw: string): Promise<string>;
+    /** Receiver accepts the finish message and returns the ready message. */
+    acceptFinish(raw: string): Promise<string>;
+    /** Sender accepts the receiver's key-confirmation message. */
+    acceptReady(raw: string): Promise<void>;
+    private establish;
 }
 
 interface SignalingEvents {
@@ -395,4 +502,4 @@ declare class PeerConnection extends EventEmitter<PeerEvents> {
     close(): void;
 }
 
-export { CHUNK_SIZE, type CryptoCapabilities, CryptoEngine, type CryptoEngineOptions, DEFAULT_ICE_SERVERS, EventEmitter, FileAssembler, FileChunker, type FileMetadata, MAX_CHUNKS, PQCrypto, PeerConnection, type PeerConnectionOptions, PeerVaultReceiver, PeerVaultSender, type ReceivedFile, type ReceiverOptions, type SenderOptions, SignalingClient, type SignalingMessage, type TransferProgress, type WritableFileSink, createFileSystemSink };
+export { CHUNK_SIZE, type CryptoCapabilities, CryptoEngine, type CryptoEngineOptions, DEFAULT_ICE_SERVERS, EventEmitter, FileAssembler, FileChunker, type FileMetadata, HybridHandshake, type HybridHandshakeJSON, type HybridRole, MAX_CHUNKS, MLKEM768_CIPHERTEXT_BYTES, MLKEM768_PUBLIC_KEY_BYTES, MLKEM768_SECRET_KEY_BYTES, MLKEM768_SEED_BYTES, MLKEM768_SHARED_SECRET_BYTES, MlKem768, type MlKem768Decapsulation, type MlKem768Encapsulation, type MlKem768KeyPair, PQCrypto, PeerConnection, type PeerConnectionOptions, PeerVaultReceiver, PeerVaultSender, type ReceivedFile, type ReceiverOptions, type SenderOptions, SignalingClient, type SignalingMessage, type TransferProgress, type WritableFileSink, base64UrlToBytes, bytesToBase64Url, createFileSystemSink, textEncoder };

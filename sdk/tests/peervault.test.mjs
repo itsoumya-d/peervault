@@ -138,14 +138,11 @@ describe('PQCrypto', () => {
     assert.ok(key.usages.includes('decrypt'), 'key can decrypt');
   });
 
-  test('ECDH is NOT ML-KEM: no post-quantum key exchange is implemented', () => {
-    // hybridKeyExchange() calls crypto.subtle.deriveBits with { name: 'ECDH' }
-    // regardless of platform, and no ML-KEM shared secret is ever mixed into the
-    // HKDF input. Node 24 *does* ship ML-KEM-768 in WebCrypto (use
-    // PQCrypto.probeMLKEM() to detect it), so the old comment claiming no platform
-    // implements it was wrong; what matters is that PeerVault never uses it.
-    assert.equal(PQCrypto.isMLKEMSupported(), false,
-      'isMLKEMSupported() must not claim post-quantum protection that does not exist');
+  test('ML-KEM support reflects the bundled wasm core', () => {
+    // PeerVault ships FIPS 203 ML-KEM-768 compiled to wasm, so this reports
+    // whether WebAssembly can execute it here. It is not a claim that a hybrid
+    // handshake has already completed.
+    assert.equal(PQCrypto.isMLKEMSupported(), typeof WebAssembly !== 'undefined');
   });
 
   test('deriveSharedKey with custom context string does not throw', async () => {

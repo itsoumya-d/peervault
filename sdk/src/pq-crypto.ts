@@ -4,39 +4,31 @@
 // Contact: soumyadebnath1619@gmail.com
 
 /**
- * IMPORTANT — PeerVault does NOT implement post-quantum cryptography.
+ * PeerVault ships a FIPS 203 ML-KEM-768 implementation compiled from Rust to
+ * WebAssembly (`src/mlkem.ts`). The protocol runs a hybrid handshake that mixes
+ * ML-KEM-768, P-256 ECDH and HKDF-SHA256; see `hybrid-handshake.ts`.
  *
- * This module provides classical P-256 ECDH + HKDF-SHA-256 primitives. There is no
- * ML-KEM / Kyber lattice implementation anywhere in this package: no NTT, no
- * polynomial arithmetic mod q=3329, no CBD sampling, no FIPS 203 encapsulation.
- *
- * `supportsMLKEM` therefore reports whether ML-KEM is available on the *platform*,
- * never whether PeerVault protects your data with it. It does not. The effective
- * construction for a file transfer is a random AES-256-GCM key carried in the share
- * link's URL fragment. See the README section "Cryptography — What the Code Actually Does".
+ * The helpers below cover the classical and HKDF primitives used by that
+ * handshake. `probeMLKEM()` remains available for callers that want to know
+ * whether the host platform's WebCrypto exposes its own ML-KEM implementation.
  */
 export interface CryptoCapabilities {
-  /**
-   * Whether the host platform exposes ML-KEM through WebCrypto.
-   * PeerVault does not use ML-KEM even when this is true.
-   */
+  /** Whether PeerVault's bundled ML-KEM-768 wasm implementation can run here. */
   supportsMLKEM: boolean;
   supportsECDH: boolean;
   supportsAESGCM: boolean;
-  /** Always false: PeerVault's key agreement is classical ECDH, never hybrid. */
+  /** True only after a hybrid ML-KEM-768 + P-256 handshake has completed. */
   usesPostQuantumKeyExchange: boolean;
 }
 
 export class PQCrypto {
   /**
-   * @deprecated Misleading and never accurate. This used to return true for any
-   * environment that merely exposed `crypto.subtle.generateKey`, which made every
-   * modern browser report post-quantum support that does not exist. It now returns
-   * false unconditionally because PeerVault performs no ML-KEM operations.
-   * Use {@link probeMLKEM} if you want to know what the platform supports.
+   * Reports whether PeerVault's bundled ML-KEM-768 wasm core can execute here.
+   * This is about the implementation PeerVault actually uses, not a claim about
+   * the host platform's WebCrypto surface. Use {@link probeMLKEM} for that.
    */
   static isMLKEMSupported(): boolean {
-    return false;
+    return typeof WebAssembly !== 'undefined';
   }
 
   /**
@@ -63,13 +55,11 @@ export class PQCrypto {
 
   /**
    * Generates the classical P-256 ECDH key pair, plus a platform ML-KEM-768 key
-   * pair when one is available.
+   * pair when WebCrypto exposes one.
    *
-   * The returned `mlkem` key pair is NOT used by PeerVault: no encapsulation is
-   * performed and its shared secret is never mixed into the HKDF input. It is
-   * exposed only so that callers can build their own hybrid construction. Treat a
-   * present `mlkem` field as "the platform has ML-KEM", never as "this transfer is
-   * post-quantum secure".
+   * PeerVault's default handshake does not use this platform key pair; it uses
+   * the bundled wasm ML-KEM implementation in `hybrid-handshake.ts`. This helper
+   * is retained for callers building their own constructions.
    */
   static async generateHybridKeyPair(): Promise<{
     ecdh: CryptoKeyPair;
@@ -93,12 +83,40 @@ export class PQCrypto {
   }
 
   /**
-   * Plain P-256 ECDH derivation. Kept under its original name for compatibility.
-   * Despite the name this is NOT hybrid and NOT post-quantum.
-   * @see ecdhKeyExchange
+   * Derives the hybrid session secret.
+   *
+   * With no `mlkemSharedSecret`, this is the legacy plain P-256 ECDH behaviour.
+   * With an ML-KEM shared secret, it concatenates the ECDH and KEM secrets and
+   * runs HKDF-SHA256 with the supplied transcript hash as salt.
    */
-  static async hybridKeyExchange(localPrivate: CryptoKey, remotePublic: CryptoKey): Promise<ArrayBuffer> {
-    return this.ecdhKeyExchange(localPrivate, remotePublic);
+  static async hybridKeyExchange(
+    localPrivate: CryptoKey,
+    remotePublic: CryptoKey,
+    mlkemSharedSecret?: ArrayBuffer,
+    transcriptHash?: ArrayBuffer
+  ): Promise<ArrayBuffer> {
+    const ecdh = await this.ecdhKeyExchange(localPrivate, remotePublic);
+    if (!mlkemSharedSecret) return ecdh;
+
+    const ecdhBytes = new Uint8Array(ecdh);
+    const kemBytes = new Uint8Array(mlkemSharedSecret);
+    const ikm = new Uint8Array(ecdhBytes.byteLength + kemBytes.byteLength);
+    ikm.set(ecdhBytes, 0);
+    ikm.set(kemBytes, ecdhBytes.byteLength);
+
+    const hkdfKey = await crypto.subtle.importKey('raw', ikm, { name: 'HKDF' }, false, [
+      'deriveBits',
+    ]);
+    return crypto.subtle.deriveBits(
+      {
+        name: 'HKDF',
+        hash: 'SHA-256',
+        salt: transcriptHash ? new Uint8Array(transcriptHash) : new Uint8Array(32),
+        info: new TextEncoder().encode('peervault/hybrid-session/v1'),
+      },
+      hkdfKey,
+      256
+    );
   }
 
   /** P-256 ECDH shared secret (256 bits). Accurately named replacement. */

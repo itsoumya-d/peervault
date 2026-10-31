@@ -1,12 +1,11 @@
-// Copyright (c) 2024-2026 Soumya Debnath. All Rights Reserved.
-// Licensed under the Business Source License 1.1 (BSL 1.1).
-// See LICENSE file for details. Production use requires a paid license.
-// Contact: soumyadebnath1619@gmail.com
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2024-2026 Soumya Debnath
 
 import { EventEmitter } from './events';
 import { SignalingClient } from './signaling-client';
 import { PeerConnection } from './peer-connection';
 import { CryptoEngine } from './crypto-engine';
+import { HybridHandshake } from './hybrid-handshake';
 import { FileAssembler, WritableFileSink } from './file-assembler';
 import { FileMetadata, ReceivedFile, TransferProgress } from './types';
 
@@ -37,6 +36,13 @@ export interface ReceiverOptions {
    * picker from the user gesture that starts the transfer.
    */
   sinkFactory?: (metadata: FileMetadata, fileIndex: number) => Promise<WritableFileSink | null>;
+  /**
+   * Run the ML-KEM-768 + P-256 hybrid handshake before accepting metadata.
+   * Default true. Set false only for interoperability with older senders.
+   */
+  hybridHandshake?: boolean;
+  /** Milliseconds to wait for the sender's hybrid finish. Default 15s. */
+  handshakeTimeoutMs?: number;
 }
 
 /** Header layout: [1B type][4B fileIndex][4B chunkIndex][12B IV][ciphertext] */
@@ -52,6 +58,10 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
   private connectTimeoutMs: number;
   private iceServers?: RTCIceServer[];
   private sinkFactory?: ReceiverOptions['sinkFactory'];
+  private hybridHandshakeEnabled: boolean;
+  private handshakeTimeoutMs: number;
+  private handshake: HybridHandshake | null = null;
+  private handshakeTimer: ReturnType<typeof setTimeout> | null = null;
 
   private metadataList: FileMetadata[] = [];
   private assemblers: Map<number, FileAssembler> = new Map();
@@ -82,6 +92,8 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     this.iceServers = options?.iceServers;
     this.connectTimeoutMs = options?.connectTimeoutMs ?? 60_000;
     this.sinkFactory = options?.sinkFactory;
+    this.hybridHandshakeEnabled = options?.hybridHandshake ?? true;
+    this.handshakeTimeoutMs = options?.handshakeTimeoutMs ?? 15_000;
     this.signaling = new SignalingClient(signalingUrl);
     this.cryptoEngine = new CryptoEngine();
   }
@@ -138,6 +150,8 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
         }
         this.dc = dc;
         this.setupDataChannel(dc);
+        // The channel is open here, so the hello can be sent immediately.
+        void this.beginHybridHandshake(dc);
       });
 
       this.peerConnection.on('error', (err: Error) => {
@@ -199,6 +213,54 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     };
   }
 
+  private async beginHybridHandshake(dc: RTCDataChannel): Promise<void> {
+    if (!this.hybridHandshakeEnabled) return;
+    try {
+      const handshake = await HybridHandshake.create(
+        'receiver',
+        this.cryptoEngine.getRawKey()
+      );
+      if (this.isCancelled) return;
+      this.handshake = handshake;
+      const hello = await handshake.createHello();
+      if (this.isCancelled || dc.readyState !== 'open') return;
+      dc.send(hello);
+      if (this.handshakeTimeoutMs > 0) {
+        this.handshakeTimer = setTimeout(() => {
+          const error = new Error(
+            `PeerVault: hybrid handshake timed out after ${this.handshakeTimeoutMs}ms`
+          );
+          this.emit('error', error);
+          this.failConnect(error);
+        }, this.handshakeTimeoutMs);
+      }
+    } catch (error) {
+      const failure = toError(error, 'PeerVault: failed to start the hybrid handshake');
+      this.emit('error', failure);
+      this.failConnect(failure);
+    }
+  }
+
+  private async handleHybridFinish(raw: string): Promise<void> {
+    try {
+      if (!this.handshake) throw new Error('PeerVault: received a hybrid finish before setup');
+      const ready = await this.handshake.acceptFinish(raw);
+      await this.cryptoEngine.deriveHybridTransferKey(
+        this.handshake.session,
+        this.handshake.transcript
+      );
+      if (this.dc && this.dc.readyState === 'open') this.dc.send(ready);
+      if (this.handshakeTimer) {
+        clearTimeout(this.handshakeTimer);
+        this.handshakeTimer = null;
+      }
+    } catch (error) {
+      const failure = toError(error, 'PeerVault: hybrid handshake failed');
+      this.emit('error', failure);
+      this.failConnect(failure);
+    }
+  }
+
   private handleControlMessage(raw: string) {
     let msg: unknown;
     try {
@@ -210,6 +272,16 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
       throw new Error('PeerVault: peer sent a non-object control message');
     }
     const m = msg as { type?: unknown; files?: unknown; fileIndex?: unknown };
+
+    if (m.type === 'pv-hybrid-finish') {
+      this.queue = this.queue
+        .then(() => this.handleHybridFinish(raw))
+        .catch((err) => {
+          if (this.isCancelled) return;
+          this.emit('error', toError(err, 'PeerVault: hybrid handshake failed'));
+        });
+      return;
+    }
 
     if (m.type === 'metadata') {
       if (!Array.isArray(m.files)) {
@@ -292,14 +364,16 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     const view = new DataView(buffer);
 
     const type = view.getUint8(0);
-    if (type !== 1) return; // Only process chunk types
+    if (type !== 1) {
+      throw new Error(`PeerVault: unsupported binary frame type ${type}`);
+    }
 
     const fileIndex = view.getUint32(1, true);
     const chunkIndex = view.getUint32(5, true);
     const iv = new Uint8Array(buffer, 9, 12);
     const ciphertext = buffer.slice(CHUNK_HEADER_BYTES);
-    // Authenticate type/fileIndex/chunkIndex as AES-GCM additional data.
-    const additionalData = new Uint8Array(buffer.slice(0, 9));
+    // Authenticate the entire 21-byte frame header, including the IV.
+    const additionalData = new Uint8Array(buffer.slice(0, CHUNK_HEADER_BYTES));
 
     const assembler = this.assemblers.get(fileIndex);
     if (!assembler) {

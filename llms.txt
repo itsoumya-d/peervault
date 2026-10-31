@@ -6,23 +6,21 @@ PeerVault transfers files directly browser-to-browser without server storage. Fi
 
 ## Status
 
-- Pre-release (v1.0.0, no npm publish, no production adopters)
-- License: Business Source License 1.1 (BSL 1.1) — not open-source
-- Tests: 46 passing (`node --test tests/*.test.mjs`)
+- Pre-release (v2.0.0, no npm publish, no production adopters)
+- License: AGPL-3.0-or-later (see LICENSE)
+- Tests: 67 passing (`cd sdk && npm test`)
 
 ## Cryptography — what the code actually implements
 
-Earlier versions of the README and blog claimed "ML-KEM / Kyber hybrid" post-quantum key exchange. **That claim was not accurate and has been retracted.** Inspection of `sdk/src/pq-crypto.ts` reveals:
+PeerVault performs a hybrid post-quantum handshake by default.
 
-- `generateECDHKeyPair()` generates a standard P-256 ECDH key pair via WebCrypto.
-- `hybridKeyExchange()` calls `crypto.subtle.deriveBits` with `{ name: 'ECDH' }` — classic elliptic-curve DH, not ML-KEM.
-- `generateHybridKeyPair()` attempts `crypto.subtle.generateKey({ name: 'ML-KEM-768' })` in a try/catch. Node 24 *does* implement ML-KEM-768 in WebCrypto, but the original call requested the `deriveBits` key usage, which is a Diffie-Hellman operation and is rejected for a KEM — so it always threw and `mlkem` was always `undefined`. Even when the key pair is generated, no encapsulation is performed and its shared secret is never mixed into the HKDF input, so the result is ECDH only either way.
-- There is **no lattice arithmetic anywhere in this repository**: no NTT, no polynomial arithmetic mod q=3329, no CBD sampling, no FIPS 203 encapsulation. Verified by search.
-- `deriveSharedKey()` correctly applies HKDF-SHA-256 to the ECDH shared secret to derive an AES-256-GCM key.
-
-**In practice the default share-link transfer path does not perform any key exchange at all.** `PeerVaultSender.createShareLink()` calls `CryptoEngine.generateKey()`, which generates a random AES-256-GCM key and base64url-encodes it into the share link's URL fragment; the receiver imports that key directly. Browsers never send the fragment to a server, so the relay cannot decrypt. The ECDH + HKDF code path (`negotiateKey`, `getLocalPublicKey`, `hybridKeyExchange`, `deriveSharedKey`) is exported and functional but is **not called** by `PeerVaultSender` or `PeerVaultReceiver`.
-
-Effective construction: **random AES-256-GCM key in the URL fragment, one fresh 96-bit IV per 64 KB chunk, GCM tag for integrity.** Classical, not post-quantum. The ML-KEM claim must not be repeated to users.
+- **ML-KEM-768 (FIPS 203)** is implemented from scratch in Rust under `pqc/`: polynomial ring `Z_q[X]/(X^256+1)` with `q=3329`, NTT/inverse NTT, CBD sampling, FIPS 203 encoding/compression, and implicit rejection. It compiles to a 49 KB wasm module with no imports and no allocator, embedded in the SDK as base64.
+- **Validation:** all 100 NIST KAT vectors pass key generation, deterministic encapsulation, decapsulation, and implicit rejection. `sdk/tests/hybrid.test.mjs` cross-checks decapsulation against Node/OpenSSL's independent ML-KEM-768 implementation and runs a 200 KB end-to-end transfer over in-memory WebRTC.
+- **Handshake:** the receiver sends an ephemeral ML-KEM-768 public key, an ephemeral P-256 public key, and a nonce, all HMAC-SHA256-authenticated with the share-link key. The sender encapsulates to both and returns the KEM ciphertext, its P-256 key, and a key confirmation. Both sides derive `session = HKDF(ECDH || ML-KEM)` and `file_key = HKDF(share_link_key || session)`.
+- **Share-link key:** a random 256-bit key in the URL fragment. Browsers never send fragments to servers. It authenticates the handshake and is mixed into the file key, so a signaling relay cannot substitute keys.
+- **Chunks:** AES-256-GCM with a fresh 96-bit IV per 64 KB chunk. The entire 21-byte frame header `[type:1][fileIndex:4][chunkIndex:4][IV:12]` is authenticated as AAD.
+- **Capabilities:** `PQCrypto.isMLKEMSupported()` reports whether the bundled wasm core can run. `CryptoEngine.getCapabilities().usesPostQuantumKeyExchange` becomes true only after a completed handshake.
+- **Opt-out:** `hybridHandshake: false` on both peers falls back to the share-link key for compatibility with pre-PQC builds; that path is classical and not post-quantum.
 
 ## Real exported symbols
 
@@ -30,7 +28,8 @@ Verified from `sdk/dist/index.mjs`:
 
 - `PeerVaultSender` — manages file selection, WebRTC setup, chunking, encryption, and sending
 - `PeerVaultReceiver` — manages joining the room, decrypting chunks, and file assembly
-- `PQCrypto` — static class exposing the crypto primitives (ECDH key generation, HKDF derivation, key export/import). `isMLKEMSupported()` is deprecated and returns `false`; use `probeMLKEM()` for a genuine platform feature probe.
+- `PQCrypto` — classical ECDH/HKDF primitives plus `hybridKeyExchange()`; `isMLKEMSupported()` reports whether the bundled ML-KEM wasm can run.
+- `MlKem768` / `HybridHandshake` — the FIPS 203 wasm API and the authenticated ML-KEM-768 + P-256 handshake.
 - `CryptoEngine` — AES-256-GCM chunk encryption/decryption and key generation/import
 - `FileChunker` / `FileAssembler` / `CHUNK_SIZE` — the chunking and reassembly path
 - `PeerConnection` / `SignalingClient` / `DEFAULT_ICE_SERVERS` — transport internals, exported so a TURN server can be supplied
@@ -40,33 +39,36 @@ Verified from `sdk/dist/index.mjs`:
 - jsDelivr CDN: `https://cdn.jsdelivr.net/gh/itsoumya-d/peervault@main/sdk/dist/index.mjs`
 - Clone and build: `git clone https://github.com/itsoumya-d/peervault && cd peervault/sdk && npm install && npm run build`
 
-## Integration recipe (executed against sdk/dist/index.mjs on Node 24)
+## Integration recipe
 
 ```javascript
-import { PQCrypto } from 'https://cdn.jsdelivr.net/gh/itsoumya-d/peervault@main/sdk/dist/index.mjs';
+import { MlKem768, HybridHandshake, CryptoEngine } from
+  'https://cdn.jsdelivr.net/gh/itsoumya-d/peervault@main/sdk/dist/index.mjs';
 
-// Generate ECDH key pair (what the code actually does)
-const { publicKey, privateKey } = await PQCrypto.generateECDHKeyPair();
+// ML-KEM-768 primitives (backed by the bundled FIPS 203 wasm)
+const kem = await MlKem768.load();
+const keyPair = kem.generateKeyPair();
+const { ciphertext, sharedSecret } = kem.encapsulate(keyPair.publicKey);
+const opened = kem.decapsulate(ciphertext, keyPair.secretKey);
+// opened.valid === true && opened.sharedSecret equals sharedSecret
 
-// Export public key for sharing with peer
-const exported = await PQCrypto.exportPublicKey(publicKey);
-// exported is a base64url string safe to embed in a URL
-
-// Derive shared AES-256-GCM key from ECDH exchange
-const peerPublic = await PQCrypto.importPublicKey(exported); // replace with peer's key
-const sharedSecret = await PQCrypto.ecdhKeyExchange(privateKey, peerPublic); // hybridKeyExchange() is the same call under an inaccurate name
-const aesKey = await PQCrypto.deriveSharedKey(sharedSecret, undefined, 'PeerVault-ECDH-v1');
-// aesKey.algorithm.name === 'AES-GCM', aesKey.algorithm.length === 256
+// The default sender/receiver path runs HybridHandshake automatically.
+// Both peers must share the same 32-byte share-link key.
+const alice = await HybridHandshake.create('sender', shareKey);
+const bob = await HybridHandshake.create('receiver', shareKey);
+const finish = await alice.acceptHello(await bob.createHello());
+const ready = await bob.acceptFinish(finish);
+await alice.acceptReady(ready);
 ```
 
-Full browser-side sender/receiver usage requires a live WebSocket relay server and RTCPeerConnection (browser environment).
+Full browser-side sender/receiver usage requires a live WebSocket relay and RTCPeerConnection.
 
 ## Known limitations
 
 - No TURN relay by default: connections fail behind symmetric or carrier-grade NAT. The default ICE configuration uses three public STUN servers (`stun.l.google.com:19302` x2, `stun.cloudflare.com:3478`) and no TURN server. Pass `{ iceServers: [...] }` to `PeerVaultSender`/`PeerVaultReceiver` to add TURN. A failed ICE negotiation now emits a distinct `error` naming the ICE state, and `connect()` rejects rather than hanging.
 - Transfers are not resumable. If either tab closes, the transfer restarts from the beginning.
-- The receiver assembles files in memory (`Blob`); measured peak RSS is roughly 1.5x the file size. There is no streaming to disk or IndexedDB.
-- Post-quantum cryptography: not implemented. No ML-KEM/Kyber code exists. The effective security is classical.
+- The receiver assembles files in memory by default (`Blob`); opt into `sinkFactory` with `createFileSystemSink()` to stream to disk. Large files otherwise remain bounded by device RAM.
+- Post-quantum cryptography is implemented (ML-KEM-768 wasm + P-256 hybrid) but has not been independently audited. `hybridHandshake: false` falls back to the classical share-link-key path.
 - File reconstruction is entirely in browser RAM — large files (multi-GB) may exhaust device memory.
 - 1:1 only: the relay supports one sender and one receiver per room.
 - No npm publication: CDN or git clone only.

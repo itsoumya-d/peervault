@@ -770,8 +770,8 @@
         <!-- Key Exchange Visualizer -->
         <section class="container" id="quantum-visualizer" style="padding: 120px 0;">
             <div class="text-center reveal-up">
-                <h2>Classical End-to-End Encryption</h2>
-                <p class="lead" style="margin: 16px auto;">AES-256-GCM via the Web Crypto API. PeerVault does <strong>not</strong> implement post-quantum cryptography &mdash; see the README for exactly what the code does.</p>
+                <h2>Hybrid Post-Quantum Encryption</h2>
+                <p class="lead" style="margin: 16px auto;">ML-KEM-768 (FIPS 203) + P-256 ECDH, mixed with HKDF-SHA256, then AES-256-GCM for every chunk. The ML-KEM core is bundled as Rust/wasm and verified against all 100 NIST KAT vectors.</p>
             </div>
             <div class="quantum-grid reveal-up" style="display: grid; grid-template-columns: 1fr auto 1fr; gap: 32px; align-items: center; margin-top: 64px;">
                 <div class="q-col" style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 32px; text-align: center;">

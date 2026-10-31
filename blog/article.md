@@ -8,7 +8,7 @@ Why do upload limits and subscription tiers exist? Because data centers cost mon
 
 This essay explores how combining **WebCrypto AES-256-GCM** with **WebRTC DataChannels** allows for zero-server peer-to-peer file transfer directly in the browser.
 
-> **Correction.** An earlier version of this article claimed PeerVault implemented "Post-Quantum Hybrid Encryption (ML-KEM + ECDH)" and streamed chunks to IndexedDB. Neither is true. There is no ML-KEM / Kyber implementation anywhere in the codebase, and the receiver assembles files in memory. The sections below describe what the code actually does.
+> **Update.** PeerVault now implements the hybrid post-quantum handshake it previously claimed: a from-scratch FIPS 203 ML-KEM-768 core in Rust/wasm, combined with P-256 ECDH and HKDF-SHA256. The core passes all 100 NIST KAT vectors. The receiver still assembles files in memory by default, with an opt-in streaming sink.
 
 ## The Architecture of Zero-Server File Transfer
 
@@ -18,19 +18,19 @@ So how is the payload secured, and what is the honest limit of that protection?
 
 ### Key Handling (What the Code Actually Does)
 
-PeerVault uses only classical, standardised WebCrypto primitives:
+PeerVault combines a bundled post-quantum core with standardised WebCrypto primitives:
 
 1. **AES-256-GCM** — the payload encryption. The sender generates a random 256-bit key and places it in the share link's URL fragment, which browsers never transmit to a server. The signaling relay therefore never sees the key.
 2. **A fresh 96-bit IV per chunk** — generated with `crypto.getRandomValues` inside the encryption call. Reusing a single IV across chunks under one AES-GCM key would leak the XOR of the plaintexts and destroy integrity.
 3. **The GCM authentication tag** — detects tampering with any chunk payload.
-4. **P-256 ECDH + HKDF-SHA-256** — available in the SDK as `PQCrypto`, but not used by the default share-link transfer path.
-5. **No ML-KEM / Kyber** — there is no lattice implementation in this codebase. The transfer is not post-quantum secure and does not address harvest-now-decrypt-later.
+4. **ML-KEM-768 (FIPS 203) + P-256 ECDH + HKDF-SHA-256** — the default handshake. The Rust/wasm ML-KEM core implements NTT, CBD sampling, and implicit rejection, and is validated against all 100 NIST KAT vectors.
+5. **Share-link key as a pre-shared secret** — authenticates the handshake with HMAC-SHA256 and is mixed into the file key, so a malicious relay cannot substitute ephemeral keys.
 
 ### 64KB Chunk Streaming
 
 Loading a very large file into RAM will crash a browser tab. On the *send* side PeerVault avoids this: it uses the File API to read files in **64KB chunks**, encrypts each chunk with its own IV, and streams them over the WebRTC Data Channel, so the sender never holds the whole file.
 
-The *receive* side is the current limitation. Chunks are decrypted and held in memory, then assembled into a `Blob`. Measured peak memory is roughly 1.5x the file size, so multi-gigabyte transfers are bounded by device RAM. Streaming to disk (File System Access API or IndexedDB) is not implemented.
+The *receive* side assembles chunks in memory by default, with peak memory roughly 1.5x the file size. Pass a `sinkFactory` using `createFileSystemSink()` to stream decrypted chunks to disk through the File System Access API.
 
 Two other honest limitations are worth stating plainly:
 
@@ -44,7 +44,7 @@ Two other honest limitations are worth stating plainly:
 | **Monthly Cost** | **$0** | $15/user | Variable (Storage + Egress) |
 | **Max File Size** | **Bounded by receiver RAM** | 200 GB | 5 TB (Multipart) |
 | **Server Storage** | **None (P2P)** | Centralized Cloud | Centralized Cloud |
-| **Encryption** | **E2E AES-256-GCM (classical)** | In-transit / At-rest | Server-Side / Client-Side |
+| **Encryption** | **Hybrid ML-KEM-768 + ECDH, AES-256-GCM** | In-transit / At-rest | Server-Side / Client-Side |
 
 ## TypeScript Integration Recipe for AI Agents
 

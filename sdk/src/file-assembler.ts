@@ -84,9 +84,9 @@ export class FileAssembler {
    * Decrypt and store one chunk. Resolves true once every distinct chunk index
    * in [0, metadata.chunks) has been received.
    *
-   * `additionalData` must be the 9-byte frame header (type, fileIndex,
-   * chunkIndex). Binding it to AES-GCM prevents a valid ciphertext from being
-   * replayed under a different file or chunk index.
+   * `additionalData` must be the full 21-byte frame header (type, fileIndex,
+   * chunkIndex, IV). Binding it to AES-GCM prevents a valid ciphertext from
+   * being replayed under a different file, chunk index, or IV.
    *
    * Duplicate and out-of-range indices are rejected rather than counted. When a
    * sink is attached, plaintext is written straight to disk and never retained
