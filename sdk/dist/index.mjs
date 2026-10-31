@@ -992,6 +992,8 @@ var PeerVaultSender = class extends EventEmitter {
   handshakeResolve = null;
   handshakeReject = null;
   handshakeTimer = null;
+  /** Serialises receiver-requested chunk retransmissions. */
+  resendQueue = Promise.resolve();
   constructor(signalingUrl, options) {
     super();
     this.signaling = new SignalingClient(signalingUrl);
@@ -1127,6 +1129,9 @@ var PeerVaultSender = class extends EventEmitter {
       void this.handleHybridHello(raw);
     } else if (message.type === "pv-hybrid-ready") {
       void this.handleHybridReady(raw);
+    } else if (message.type === "pv-request-chunks") {
+      const request = message;
+      void this.handleChunkRequest(request);
     }
   }
   async handleHybridHello(raw) {
@@ -1193,7 +1198,7 @@ var PeerVaultSender = class extends EventEmitter {
       );
       for (let i = 0; i < this.files.length; i++) {
         if (this.isCancelled) break;
-        await this.transferFile(i, chunkers[i], this.files[i].size, metadataList[i].chunks);
+        await this.transferFile(i, this.files[i].size, metadataList[i].chunks);
       }
       if (!this.isCancelled) {
         this.emit("complete", void 0);
@@ -1202,29 +1207,13 @@ var PeerVaultSender = class extends EventEmitter {
       this.emit("error", toError(err, "PeerVault: transfer failed"));
     }
   }
-  async transferFile(fileIndex, chunker, totalBytes, totalChunks) {
-    let chunkIndex = 0;
+  async transferFile(fileIndex, totalBytes, totalChunks) {
     let bytesTransferred = 0;
-    while (!this.isCancelled) {
-      const chunkData = await chunker.getNextChunk();
-      if (chunkData === null) break;
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      const header = new Uint8Array(21);
-      const headerView = new DataView(header.buffer);
-      headerView.setUint8(0, 1);
-      headerView.setUint32(1, fileIndex, true);
-      headerView.setUint32(5, chunkIndex, true);
-      header.set(iv, 9);
-      const { ciphertext } = await this.cryptoEngine.encryptChunk(chunkData, header, iv);
-      const buffer = new ArrayBuffer(21 + ciphertext.byteLength);
-      const u8 = new Uint8Array(buffer);
-      u8.set(header, 0);
-      u8.set(new Uint8Array(ciphertext), 21);
-      await this.waitForDrain();
-      if (this.isCancelled) return;
-      if (!this.dc || this.dc.readyState !== "open") throw new Error("DataChannel closed");
-      this.dc.send(buffer);
-      bytesTransferred += chunkData.byteLength;
+    const file = this.files[fileIndex];
+    for (let chunkIndex = 0; chunkIndex < totalChunks && !this.isCancelled; chunkIndex++) {
+      await this.sendChunk(file, fileIndex, chunkIndex);
+      const start = chunkIndex * CHUNK_SIZE;
+      bytesTransferred += Math.min(CHUNK_SIZE, Math.max(0, file.size - start));
       this.emit("progress", {
         fileIndex,
         chunkIndex,
@@ -1232,7 +1221,6 @@ var PeerVaultSender = class extends EventEmitter {
         bytesTransferred,
         totalBytes
       });
-      chunkIndex++;
     }
     if (!this.isCancelled && this.dc && this.dc.readyState === "open") {
       this.dc.send(
@@ -1242,6 +1230,76 @@ var PeerVaultSender = class extends EventEmitter {
         })
       );
     }
+  }
+  /**
+   * Resend specific chunk indices. The receiver calls this through the
+   * `pv-request-chunks` control message after persisting a bitmap and
+   * reconnecting; each chunk is read from the original File, never buffered.
+   */
+  async resendChunks(fileIndex, indices) {
+    if (!Number.isSafeInteger(fileIndex) || fileIndex < 0 || fileIndex >= this.files.length) {
+      throw new RangeError(`fileIndex ${String(fileIndex)} is out of range`);
+    }
+    if (!Array.isArray(indices) || indices.length === 0) {
+      throw new TypeError("indices must be a non-empty array");
+    }
+    if (indices.length > 4096) {
+      throw new RangeError("at most 4096 chunks can be requested at once");
+    }
+    const file = this.files[fileIndex];
+    const totalChunks = this.totalChunks(file);
+    const unique = [...new Set(indices)].sort((a, b) => a - b);
+    for (const index of unique) {
+      if (!Number.isSafeInteger(index) || index < 0 || index >= totalChunks) {
+        throw new RangeError(`chunk index ${String(index)} is out of range [0, ${totalChunks})`);
+      }
+    }
+    const run = this.resendQueue.then(async () => {
+      for (const index of unique) {
+        await this.sendChunk(file, fileIndex, index);
+      }
+      return unique.length;
+    });
+    this.resendQueue = run.then(() => void 0, () => void 0);
+    return run;
+  }
+  totalChunks(file) {
+    return file.size === 0 ? 1 : Math.ceil(file.size / CHUNK_SIZE);
+  }
+  async handleChunkRequest(request) {
+    try {
+      const fileIndex = Number(request.fileIndex);
+      if (!Number.isSafeInteger(fileIndex)) {
+        throw new TypeError("pv-request-chunks fileIndex must be an integer");
+      }
+      if (!Array.isArray(request.indices)) {
+        throw new TypeError("pv-request-chunks indices must be an array");
+      }
+      await this.resendChunks(fileIndex, request.indices.map(Number));
+    } catch (error) {
+      this.emit("error", toError(error, "PeerVault: chunk resend failed"));
+    }
+  }
+  async sendChunk(file, fileIndex, chunkIndex) {
+    const start = chunkIndex * CHUNK_SIZE;
+    const end = Math.min(file.size, start + CHUNK_SIZE);
+    const chunkData = await file.slice(start, end).arrayBuffer();
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const header = new Uint8Array(21);
+    const headerView = new DataView(header.buffer);
+    headerView.setUint8(0, 1);
+    headerView.setUint32(1, fileIndex, true);
+    headerView.setUint32(5, chunkIndex, true);
+    header.set(iv, 9);
+    const { ciphertext } = await this.cryptoEngine.encryptChunk(chunkData, header, iv);
+    const buffer = new ArrayBuffer(21 + ciphertext.byteLength);
+    const u8 = new Uint8Array(buffer);
+    u8.set(header, 0);
+    u8.set(new Uint8Array(ciphertext), 21);
+    await this.waitForDrain();
+    if (this.isCancelled) return;
+    if (!this.dc || this.dc.readyState !== "open") throw new Error("DataChannel closed");
+    this.dc.send(buffer);
   }
   /**
    * Waits for the data channel send buffer to drain. Bounded by stallTimeoutMs and
@@ -1276,13 +1334,129 @@ function toError(e, fallback) {
   return new Error(fallback);
 }
 
+// src/chunk-bitmap.ts
+var MAX_BITMAP_CHUNKS = 1e7;
+function assertIndex(index, size) {
+  if (!Number.isSafeInteger(index) || index < 0 || index >= size) {
+    throw new RangeError(`chunk index ${String(index)} out of range [0, ${size})`);
+  }
+}
+function bytesToBase64(bytes) {
+  let binary = "";
+  const window = 32768;
+  for (let offset = 0; offset < bytes.length; offset += window) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + window));
+  }
+  return btoa(binary);
+}
+function base64ToBytes2(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+var ChunkBitmap = class _ChunkBitmap {
+  size;
+  bytes;
+  constructor(size, bytes) {
+    if (!Number.isSafeInteger(size) || size < 0 || size > MAX_BITMAP_CHUNKS) {
+      throw new RangeError(
+        `bitmap size must be an integer in [0, ${MAX_BITMAP_CHUNKS}], received ${String(size)}`
+      );
+    }
+    this.size = size;
+    const expected = Math.ceil(size / 8);
+    if (bytes === void 0) {
+      this.bytes = new Uint8Array(expected);
+    } else {
+      if (!(bytes instanceof Uint8Array) || bytes.length !== expected) {
+        throw new TypeError(`bitmap bytes must be a Uint8Array of length ${expected}`);
+      }
+      this.bytes = new Uint8Array(bytes);
+    }
+  }
+  mark(index) {
+    assertIndex(index, this.size);
+    this.bytes[index >> 3] |= 1 << (index & 7);
+    return this;
+  }
+  clear(index) {
+    assertIndex(index, this.size);
+    this.bytes[index >> 3] &= ~(1 << (index & 7));
+    return this;
+  }
+  has(index) {
+    assertIndex(index, this.size);
+    return (this.bytes[index >> 3] & 1 << (index & 7)) !== 0;
+  }
+  get count() {
+    let total = 0;
+    for (let i = 0; i < this.bytes.length; i++) {
+      let value = this.bytes[i];
+      value = value - (value >> 1 & 85);
+      value = (value & 51) + (value >> 2 & 51);
+      total += value + (value >> 4) & 15;
+    }
+    return total;
+  }
+  get complete() {
+    return this.count === this.size;
+  }
+  missing(limit = Number.POSITIVE_INFINITY) {
+    if (limit !== Number.POSITIVE_INFINITY && (!Number.isSafeInteger(limit) || limit < 0)) {
+      throw new RangeError("limit must be a non-negative integer or Infinity");
+    }
+    const out = [];
+    if (limit === 0) return out;
+    for (let index = 0; index < this.size; index++) {
+      if (!this.has(index)) {
+        out.push(index);
+        if (out.length >= limit) break;
+      }
+    }
+    return out;
+  }
+  *missingIterator() {
+    for (let index = 0; index < this.size; index++) {
+      if (!this.has(index)) yield index;
+    }
+  }
+  toBytes() {
+    return new Uint8Array(this.bytes);
+  }
+  toBase64() {
+    return bytesToBase64(this.bytes);
+  }
+  toJSON() {
+    return { size: this.size, base64: this.toBase64() };
+  }
+  clone() {
+    return new _ChunkBitmap(this.size, this.bytes);
+  }
+  static fromBase64(value, size) {
+    if (typeof value !== "string") {
+      throw new TypeError("bitmap base64 value must be a string");
+    }
+    return new _ChunkBitmap(size, base64ToBytes2(value));
+  }
+  static fromJSON(value) {
+    if (!value || typeof value !== "object") {
+      throw new TypeError("bitmap JSON must be an object");
+    }
+    const record = value;
+    if (typeof record.base64 !== "string") {
+      throw new TypeError("bitmap JSON.base64 must be a string");
+    }
+    return _ChunkBitmap.fromBase64(record.base64, Number(record.size));
+  }
+};
+
 // src/file-assembler.ts
 var MAX_CHUNKS = 1e6;
-async function createFileSystemSink(suggestedName, chunkSize = CHUNK_SIZE) {
-  const picker = globalThis.showSaveFilePicker;
-  if (typeof picker !== "function") return null;
-  const handle = await picker({ suggestedName });
-  const writable = await handle.createWritable();
+function createWritableSink(writable, chunkSize = CHUNK_SIZE) {
+  if (!writable || typeof writable.write !== "function" || typeof writable.close !== "function") {
+    throw new TypeError("writable must implement write() and close()");
+  }
   return {
     async writeChunk(index, data) {
       await writable.write({ type: "write", position: index * chunkSize, data });
@@ -1292,9 +1466,27 @@ async function createFileSystemSink(suggestedName, chunkSize = CHUNK_SIZE) {
     }
   };
 }
+async function createFileSystemSink(suggestedName, chunkSize = CHUNK_SIZE) {
+  const picker = globalThis.showSaveFilePicker;
+  if (typeof picker !== "function") return null;
+  const handle = await picker({ suggestedName });
+  const writable = await handle.createWritable();
+  return createWritableSink(writable, chunkSize);
+}
+async function createOpfsSink(fileName, chunkSize = CHUNK_SIZE) {
+  if (typeof fileName !== "string" || fileName.length === 0) {
+    throw new TypeError("fileName must be a non-empty string");
+  }
+  const storage = globalThis.navigator?.storage;
+  if (!storage || typeof storage.getDirectory !== "function") return null;
+  const root = await storage.getDirectory();
+  const handle = await root.getFileHandle(fileName, { create: true });
+  const writable = await handle.createWritable();
+  return createWritableSink(writable, chunkSize);
+}
 var FileAssembler = class {
   chunks = [];
-  receivedIndices = [];
+  bitmap;
   receivedChunks = 0;
   receivedBytes = 0;
   metadata;
@@ -1315,7 +1507,7 @@ var FileAssembler = class {
     this.metadata = metadata;
     this.cryptoEngine = cryptoEngine;
     this.chunks = new Array(declared);
-    this.receivedIndices = new Array(declared).fill(false);
+    this.bitmap = new ChunkBitmap(declared);
     this.sink = sink;
   }
   /**
@@ -1334,17 +1526,17 @@ var FileAssembler = class {
     if (!Number.isSafeInteger(index) || index < 0 || index >= this.metadata.chunks) {
       throw new Error(`Chunk index ${String(index)} out of range [0, ${this.metadata.chunks})`);
     }
-    if (this.receivedIndices[index]) {
+    if (this.bitmap.has(index)) {
       return this.isComplete();
     }
     const plaintext = await this.cryptoEngine.decryptChunk(iv, ciphertext, additionalData);
-    if (this.receivedIndices[index]) return this.isComplete();
+    if (this.bitmap.has(index)) return this.isComplete();
     if (this.sink) {
       await this.sink.writeChunk(index, plaintext);
     } else {
       this.chunks[index] = plaintext;
     }
-    this.receivedIndices[index] = true;
+    this.bitmap.mark(index);
     this.receivedChunks++;
     this.receivedBytes += plaintext.byteLength;
     return this.isComplete();
@@ -1359,6 +1551,17 @@ var FileAssembler = class {
   /** Distinct chunks accepted so far, plus decrypted byte total. */
   get progress() {
     return { received: this.receivedChunks, total: this.metadata.chunks, bytes: this.receivedBytes };
+  }
+  /** Clone of the received-chunk bitmap, safe for persistence. */
+  receivedBitmap() {
+    return this.bitmap.clone();
+  }
+  /**
+   * Missing chunk indices, in ascending order. `limit` bounds the returned
+   * array; pass Infinity to enumerate everything.
+   */
+  missingChunks(limit = 1e3) {
+    return this.bitmap.missing(limit);
   }
   assemble() {
     if (this.sink) {
@@ -1544,6 +1747,32 @@ var PeerVaultReceiver = class extends EventEmitter {
     const buffered = this.pendingChunks;
     this.pendingChunks = [];
     for (const buf of buffered) this.enqueueChunk(buf);
+  }
+  /**
+   * Ask the sender to resend missing chunks for one file. Intended for a
+   * resumed transfer: persist `assembler.receivedBitmap()` (or the sink's
+   * state), reconnect, then call this with the new assembler. Returns the
+   * number of indices requested.
+   */
+  requestMissingChunks(fileIndex, limit = 1e3) {
+    if (!Number.isSafeInteger(fileIndex) || fileIndex < 0) {
+      throw new RangeError(`fileIndex ${String(fileIndex)} is invalid`);
+    }
+    const assembler = this.assemblers.get(fileIndex);
+    if (!assembler) throw new Error(`No assembler for fileIndex ${fileIndex}`);
+    if (!this.dc || this.dc.readyState !== "open") {
+      throw new Error("PeerVault: data channel is not open");
+    }
+    const missing = assembler.missingChunks(limit);
+    if (missing.length === 0) return 0;
+    this.dc.send(
+      JSON.stringify({
+        type: "pv-request-chunks",
+        fileIndex,
+        indices: missing
+      })
+    );
+    return missing.length;
   }
   setupDataChannel(dc) {
     dc.onmessage = (event) => {
@@ -1757,22 +1986,22 @@ function toError2(e, fallback) {
 }
 
 // src/datamesh.ts
-function bytesToBase64(bytes) {
+function bytesToBase642(bytes) {
   let binary = "";
   for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 }
-function base64ToBytes2(value) {
+function base64ToBytes3(value) {
   const binary = atob(value);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
 }
 function encodeFloat32(vector) {
-  return bytesToBase64(new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength));
+  return bytesToBase642(new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength));
 }
 function decodeFloat32(value) {
-  const bytes = base64ToBytes2(value);
+  const bytes = base64ToBytes3(value);
   return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
 }
 function wins(remote, local) {
@@ -1887,12 +2116,14 @@ var MeshNode = class {
 };
 export {
   CHUNK_SIZE,
+  ChunkBitmap,
   CryptoEngine,
   DEFAULT_ICE_SERVERS,
   EventEmitter,
   FileAssembler,
   FileChunker,
   HybridHandshake,
+  MAX_BITMAP_CHUNKS,
   MAX_CHUNKS,
   MLKEM768_CIPHERTEXT_BYTES,
   MLKEM768_PUBLIC_KEY_BYTES,
@@ -1909,6 +2140,8 @@ export {
   base64UrlToBytes,
   bytesToBase64Url,
   createFileSystemSink,
+  createOpfsSink,
+  createWritableSink,
   decodeFloat32,
   encodeFloat32,
   textEncoder

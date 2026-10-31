@@ -194,6 +194,34 @@ export class PeerVaultReceiver extends EventEmitter<ReceiverEvents> {
     for (const buf of buffered) this.enqueueChunk(buf);
   }
 
+  /**
+   * Ask the sender to resend missing chunks for one file. Intended for a
+   * resumed transfer: persist `assembler.receivedBitmap()` (or the sink's
+   * state), reconnect, then call this with the new assembler. Returns the
+   * number of indices requested.
+   */
+  requestMissingChunks(fileIndex: number, limit = 1000): number {
+    if (!Number.isSafeInteger(fileIndex) || fileIndex < 0) {
+      throw new RangeError(`fileIndex ${String(fileIndex)} is invalid`);
+    }
+    const assembler = this.assemblers.get(fileIndex);
+    if (!assembler) throw new Error(`No assembler for fileIndex ${fileIndex}`);
+    if (!this.dc || this.dc.readyState !== 'open') {
+      throw new Error('PeerVault: data channel is not open');
+    }
+
+    const missing = assembler.missingChunks(limit);
+    if (missing.length === 0) return 0;
+    this.dc.send(
+      JSON.stringify({
+        type: 'pv-request-chunks',
+        fileIndex,
+        indices: missing,
+      })
+    );
+    return missing.length;
+  }
+
   private setupDataChannel(dc: RTCDataChannel) {
     dc.onmessage = (event) => {
       if (this.isCancelled) return;
