@@ -40,9 +40,19 @@ PeerVault is a browser SDK for serverless, end-to-end encrypted file transfers. 
 
 ## Installation
 
-The SDK package lives in `sdk/`. This library is **not published to npm**.
+The SDK package lives in `sdk/` and is published as [`peervault@2.0.0`](https://www.npmjs.com/package/peervault/v/2.0.0).
 
-### Option A — jsDelivr CDN (browser, no build step)
+### Option A — npm
+
+```bash
+npm install peervault@2.0.0
+```
+
+```ts
+import { PeerVaultSender, PeerVaultReceiver, createOpfsSink } from 'peervault';
+```
+
+### Option B — jsDelivr CDN (browser, no build step)
 
 ```html
 <script type="module">
@@ -51,7 +61,7 @@ The SDK package lives in `sdk/`. This library is **not published to npm**.
 </script>
 ```
 
-### Option B — Clone and build
+### Option C — Clone and build
 
 ```bash
 git clone https://github.com/itsoumya-d/peervault.git
@@ -409,7 +419,7 @@ WebRTC requires a secure context (`wss://`). Deploy the relay behind an SSL-term
 
 ## Known Limitations
 
-- **Pre-release status.** Not on npm. No production adopters. API may change.
+- **Pre-release status.** Published as `peervault@2.0.0`. No production adopters. API may change.
 - **Not independently audited.** ML-KEM-768 is implemented and KAT-tested, but this SDK has not had a third-party security review. Do not treat it as audited production cryptography yet.
 - **Hybrid handshake compatibility.** Both peers must support the PQC handshake. `hybridHandshake: false` keeps interoperability with pre-PQC peers but disables post-quantum protection.
 - **No TURN relay by default — connections fail behind symmetric or carrier-grade NAT.** See [`docs/coturn.md`](docs/coturn.md) for the OCI/coturn runbook (configuration only; not deployed here). The default ICE configuration uses three public STUN servers (`stun.l.google.com:19302` x2, `stun.cloudflare.com:3478`) and no TURN server. Pass your own list to fix this:
