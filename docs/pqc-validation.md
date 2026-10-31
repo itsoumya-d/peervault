@@ -60,7 +60,21 @@ npm run build
 npm test
 ```
 
-Result: **69/69 tests pass** (Node 26.3.0).
+Result: **75/75 tests pass** (Node 26.3.0), including mesh convergence, LWW conflict resolution, encrypted control messages, and full-header fuzz rejection.
+
+## Datamesh and chunk throughput
+
+`npm run bench:throughput` (local AES-GCM, 300 × 64 KiB chunks):
+
+| Operation | Throughput |
+|---|---:|
+| Encrypt | 1395 MB/s |
+| Decrypt | 1043 MB/s |
+| Mesh state serialize (1,000 × 768 dims) | 64.8 ms |
+| Mesh state apply | 16.4 ms |
+
+The mesh state is 4.16 MB of base64 JSON. These are local measurements; no live
+WebRTC/DataChannel network throughput is claimed.
 
 ## Microbenchmarks
 

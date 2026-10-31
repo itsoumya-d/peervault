@@ -473,6 +473,40 @@ var CryptoEngine = class {
     );
     return { iv, ciphertext };
   }
+  /**
+   * Encrypt an application control message (for example a datamesh sync
+   * payload). The 12-byte IV is prepended and bound as AES-GCM AAD.
+   */
+  async encryptMessage(message) {
+    if (!this.key) throw new Error("Key not initialized");
+    const data = new TextEncoder().encode(message).buffer;
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: iv },
+      this.key,
+      data
+    );
+    const output = new Uint8Array(12 + ciphertext.byteLength);
+    output.set(iv, 0);
+    output.set(new Uint8Array(ciphertext), 12);
+    return output.buffer;
+  }
+  /** Decrypt a control message produced by encryptMessage(). */
+  async decryptMessage(buffer) {
+    if (!this.key) throw new Error("Key not initialized");
+    const bytes = new Uint8Array(buffer);
+    if (bytes.byteLength < 12 + 16) {
+      throw new Error("PeerVault: encrypted message is too short");
+    }
+    const iv = bytes.slice(0, 12);
+    const ciphertext = bytes.slice(12);
+    const plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv, additionalData: iv },
+      this.key,
+      ciphertext
+    );
+    return new TextDecoder().decode(plaintext);
+  }
   async decryptChunk(iv, ciphertext, additionalData) {
     if (!this.key) throw new Error("Key not initialized");
     const ivBytes = new Uint8Array(iv.byteLength);
@@ -1721,6 +1755,136 @@ function toError2(e, fallback) {
   }
   return new Error(fallback);
 }
+
+// src/datamesh.ts
+function bytesToBase64(bytes) {
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+function base64ToBytes2(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+function encodeFloat32(vector) {
+  return bytesToBase64(new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength));
+}
+function decodeFloat32(value) {
+  const bytes = base64ToBytes2(value);
+  return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
+}
+function wins(remote, local) {
+  if (remote.version !== local.version) return remote.version > local.version;
+  return remote.origin > local.origin;
+}
+var MeshNode = class {
+  nodeId;
+  clock = 0;
+  vectors = /* @__PURE__ */ new Map();
+  memories = /* @__PURE__ */ new Map();
+  constructor(nodeId) {
+    if (!nodeId) throw new Error("MeshNode requires a nodeId");
+    this.nodeId = nodeId;
+  }
+  upsertVector(id, embedding, metadata) {
+    if (embedding.length === 0) throw new Error("embedding must not be empty");
+    const entry = {
+      id,
+      embedding: embedding.slice(),
+      metadata,
+      version: ++this.clock,
+      origin: this.nodeId
+    };
+    const existing = this.vectors.get(id);
+    if (!existing || wins(entry, existing)) this.vectors.set(id, entry);
+    return entry;
+  }
+  upsertMemory(id, text, weight) {
+    if (!text.trim()) throw new Error("memory text must not be empty");
+    const entry = {
+      id,
+      text,
+      weight,
+      version: ++this.clock,
+      origin: this.nodeId
+    };
+    const existing = this.memories.get(id);
+    if (!existing || wins(entry, existing)) this.memories.set(id, entry);
+    return entry;
+  }
+  getVector(id) {
+    return this.vectors.get(id);
+  }
+  getMemory(id) {
+    return this.memories.get(id);
+  }
+  get stats() {
+    return {
+      vectors: this.vectors.size,
+      memories: this.memories.size,
+      clock: this.clock
+    };
+  }
+  serialize() {
+    return {
+      nodeId: this.nodeId,
+      vectors: [...this.vectors.values()].map((vector) => ({
+        id: vector.id,
+        embedding: encodeFloat32(vector.embedding),
+        metadata: vector.metadata,
+        version: vector.version,
+        origin: vector.origin
+      })),
+      memories: [...this.memories.values()].map((memory) => ({ ...memory }))
+    };
+  }
+  apply(state) {
+    for (const vector of state.vectors) {
+      const entry = {
+        id: vector.id,
+        embedding: decodeFloat32(vector.embedding),
+        metadata: vector.metadata,
+        version: vector.version,
+        origin: vector.origin
+      };
+      const existing = this.vectors.get(entry.id);
+      if (!existing || wins(entry, existing)) this.vectors.set(entry.id, entry);
+    }
+    for (const memory of state.memories) {
+      const existing = this.memories.get(memory.id);
+      if (!existing || wins(memory, existing)) this.memories.set(memory.id, { ...memory });
+    }
+  }
+  /** Send our full state; the peer replies with its state on hello. */
+  startSync(transport) {
+    transport.send(
+      JSON.stringify({ type: "datamesh-hello", state: this.serialize() })
+    );
+  }
+  /** Wire this to the DataChannel onmessage handler. */
+  handleMessage(raw, transport) {
+    let message;
+    try {
+      message = JSON.parse(raw);
+    } catch {
+      throw new Error("PeerVault datamesh: message is not valid JSON");
+    }
+    if (!message || message.type !== "datamesh-hello" && message.type !== "datamesh-state") {
+      throw new Error("PeerVault datamesh: unknown message type");
+    }
+    if (!message.state || typeof message.state.nodeId !== "string") {
+      throw new Error("PeerVault datamesh: malformed state");
+    }
+    this.apply(message.state);
+    if (message.type === "datamesh-hello") {
+      transport.send(
+        JSON.stringify({ type: "datamesh-state", state: this.serialize() })
+      );
+    }
+  }
+};
 export {
   CHUNK_SIZE,
   CryptoEngine,
@@ -1735,6 +1899,7 @@ export {
   MLKEM768_SECRET_KEY_BYTES,
   MLKEM768_SEED_BYTES,
   MLKEM768_SHARED_SECRET_BYTES,
+  MeshNode,
   MlKem768,
   PQCrypto,
   PeerConnection,
@@ -1744,6 +1909,8 @@ export {
   base64UrlToBytes,
   bytesToBase64Url,
   createFileSystemSink,
+  decodeFloat32,
+  encodeFloat32,
   textEncoder
 };
 //# sourceMappingURL=index.mjs.map

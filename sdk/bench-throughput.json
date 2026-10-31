@@ -1,0 +1,21 @@
+{
+  "chunk_bytes": 65536,
+  "iterations": 300,
+  "encrypt": {
+    "total_ms": 13.44,
+    "mb_per_sec": 1395,
+    "ciphertext_bytes": 19665600
+  },
+  "decrypt": {
+    "total_ms": 17.97,
+    "mb_per_sec": 1043.4
+  },
+  "datamesh": {
+    "vectors": 1000,
+    "dimensions": 768,
+    "serialize_ms": 64.84,
+    "apply_ms": 16.41,
+    "state_json_bytes": 4161832
+  },
+  "note": "Local crypto/serialization only; not P2P network throughput."
+}

@@ -188,7 +188,7 @@ written.
 
 ### Validation and benchmarks
 
-See [`docs/pqc-validation.md`](docs/pqc-validation.md) for KAT results, interop checks, protocol tests, and microbenchmarks. In short: 100/100 NIST KAT vectors, interop with Node/OpenSSL, 69/69 SDK tests, and a full handshake at p50 0.836 ms / p95 1.082 ms on an Apple Silicon laptop.
+See [`docs/pqc-validation.md`](docs/pqc-validation.md) for KAT results, interop checks, protocol tests, and microbenchmarks. In short: 100/100 NIST KAT vectors, interop with Node/OpenSSL, 75/75 SDK tests, and a full handshake at p50 0.836 ms / p95 1.082 ms on an Apple Silicon laptop.
 
 ### Security scope
 
@@ -200,6 +200,39 @@ hybrid handshake protects recorded traffic against future quantum decryption,
 but it does not provide identity verification beyond possession of the link.
 
 ---
+
+### Federated vector/memory mesh
+
+`MeshNode` synchronizes edgeinfer vector records and Reflexion memory entries
+over any string transport (typically a WebRTC DataChannel). Entries carry a
+logical version and an origin node id; merging is last-writer-wins with a
+deterministic origin tie-breaker.
+
+```ts
+import { MeshNode, CryptoEngine } from 'peervault';
+
+const node = new MeshNode('laptop-a');
+node.upsertVector('chunk-1', embedding);       // Float32Array(768)
+node.upsertMemory('lesson-1', 'check the tests', 1.0);
+
+const channel = { send: (data: string | ArrayBuffer) => dc.send(data) };
+node.startSync({ send: (data) => channel.send(data) });
+dc.onmessage = (event) => {
+  if (typeof event.data === 'string') node.handleMessage(event.data, {
+    send: (data) => channel.send(data),
+  });
+};
+```
+
+For end-to-end control-message encryption, `CryptoEngine.encryptMessage()` and
+`decryptMessage()` use AES-256-GCM with the 12-byte IV bound as AAD. Use the
+key derived by the hybrid handshake so vector/memory sync inherits the same
+ML-KEM-768 + P-256 session.
+
+Local throughput (300 × 64 KiB chunks, Apple Silicon): encrypt **1395 MB/s**,
+decrypt **1043 MB/s**. A 1,000 × 768-dim vector state serializes in 64.8 ms and
+applies in 16.4 ms (4.16 MB base64 JSON). These are local crypto/serialization
+measurements, not live P2P throughput. Reproduce with `npm run bench:throughput`.
 
 ## API Reference
 

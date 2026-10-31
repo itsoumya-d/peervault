@@ -23,7 +23,8 @@
     "test": "node --test tests/*.test.mjs",
     "prepublishOnly": "npm run build",
     "build:mlkem": "node scripts/build-mlkem.mjs",
-    "bench:pqc": "node scripts/bench-pqc.mjs"
+    "bench:pqc": "node scripts/bench-pqc.mjs",
+    "bench:throughput": "node scripts/bench-throughput.mjs"
   },
   "keywords": [
     "webrtc",

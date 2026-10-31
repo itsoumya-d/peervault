@@ -9,6 +9,7 @@ export * from './receiver';
 export * from './pq-crypto';
 export * from './mlkem';
 export * from './hybrid-handshake';
+export * from './datamesh';
 // Previously internal. Exported so consumers can supply their own TURN servers
 // and so the chunking / assembly / crypto paths are directly testable.
 export * from './crypto-engine';

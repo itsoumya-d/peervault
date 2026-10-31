@@ -228,6 +228,13 @@ declare class CryptoEngine {
         iv: Uint8Array;
         ciphertext: ArrayBuffer;
     }>;
+    /**
+     * Encrypt an application control message (for example a datamesh sync
+     * payload). The 12-byte IV is prepended and bound as AES-GCM AAD.
+     */
+    encryptMessage(message: string): Promise<ArrayBuffer>;
+    /** Decrypt a control message produced by encryptMessage(). */
+    decryptMessage(buffer: ArrayBuffer): Promise<string>;
     decryptChunk(iv: Uint8Array, ciphertext: ArrayBuffer, additionalData?: Uint8Array): Promise<ArrayBuffer>;
     private bufferToBase64Url;
     private base64UrlToBuffer;
@@ -443,6 +450,63 @@ declare class HybridHandshake {
     private establish;
 }
 
+interface MeshVector {
+    id: string;
+    embedding: Float32Array;
+    metadata?: Record<string, unknown>;
+    version: number;
+    origin: string;
+}
+interface MeshMemory {
+    id: string;
+    text: string;
+    weight: number;
+    version: number;
+    origin: string;
+}
+interface MeshState {
+    nodeId: string;
+    vectors: Array<{
+        id: string;
+        embedding: string;
+        metadata?: Record<string, unknown>;
+        version: number;
+        origin: string;
+    }>;
+    memories: MeshMemory[];
+}
+interface MeshMessage {
+    type: "datamesh-hello" | "datamesh-state";
+    state: MeshState;
+}
+interface MeshTransport {
+    send(data: string): void;
+}
+declare function encodeFloat32(vector: Float32Array): string;
+declare function decodeFloat32(value: string): Float32Array;
+declare class MeshNode {
+    readonly nodeId: string;
+    private clock;
+    private vectors;
+    private memories;
+    constructor(nodeId: string);
+    upsertVector(id: string, embedding: Float32Array, metadata?: Record<string, unknown>): MeshVector;
+    upsertMemory(id: string, text: string, weight: number): MeshMemory;
+    getVector(id: string): MeshVector | undefined;
+    getMemory(id: string): MeshMemory | undefined;
+    get stats(): {
+        vectors: number;
+        memories: number;
+        clock: number;
+    };
+    serialize(): MeshState;
+    apply(state: MeshState): void;
+    /** Send our full state; the peer replies with its state on hello. */
+    startSync(transport: MeshTransport): void;
+    /** Wire this to the DataChannel onmessage handler. */
+    handleMessage(raw: string, transport: MeshTransport): void;
+}
+
 interface SignalingEvents {
     open: void;
     message: SignalingMessage;
@@ -502,4 +566,4 @@ declare class PeerConnection extends EventEmitter<PeerEvents> {
     close(): void;
 }
 
-export { CHUNK_SIZE, type CryptoCapabilities, CryptoEngine, type CryptoEngineOptions, DEFAULT_ICE_SERVERS, EventEmitter, FileAssembler, FileChunker, type FileMetadata, HybridHandshake, type HybridHandshakeJSON, type HybridRole, MAX_CHUNKS, MLKEM768_CIPHERTEXT_BYTES, MLKEM768_PUBLIC_KEY_BYTES, MLKEM768_SECRET_KEY_BYTES, MLKEM768_SEED_BYTES, MLKEM768_SHARED_SECRET_BYTES, MlKem768, type MlKem768Decapsulation, type MlKem768Encapsulation, type MlKem768KeyPair, PQCrypto, PeerConnection, type PeerConnectionOptions, PeerVaultReceiver, PeerVaultSender, type ReceivedFile, type ReceiverOptions, type SenderOptions, SignalingClient, type SignalingMessage, type TransferProgress, type WritableFileSink, base64UrlToBytes, bytesToBase64Url, createFileSystemSink, textEncoder };
+export { CHUNK_SIZE, type CryptoCapabilities, CryptoEngine, type CryptoEngineOptions, DEFAULT_ICE_SERVERS, EventEmitter, FileAssembler, FileChunker, type FileMetadata, HybridHandshake, type HybridHandshakeJSON, type HybridRole, MAX_CHUNKS, MLKEM768_CIPHERTEXT_BYTES, MLKEM768_PUBLIC_KEY_BYTES, MLKEM768_SECRET_KEY_BYTES, MLKEM768_SEED_BYTES, MLKEM768_SHARED_SECRET_BYTES, type MeshMemory, type MeshMessage, MeshNode, type MeshState, type MeshTransport, type MeshVector, MlKem768, type MlKem768Decapsulation, type MlKem768Encapsulation, type MlKem768KeyPair, PQCrypto, PeerConnection, type PeerConnectionOptions, PeerVaultReceiver, PeerVaultSender, type ReceivedFile, type ReceiverOptions, type SenderOptions, SignalingClient, type SignalingMessage, type TransferProgress, type WritableFileSink, base64UrlToBytes, bytesToBase64Url, createFileSystemSink, decodeFloat32, encodeFloat32, textEncoder };

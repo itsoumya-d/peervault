@@ -136,6 +136,42 @@ export class CryptoEngine {
     return { iv, ciphertext };
   }
 
+  /**
+   * Encrypt an application control message (for example a datamesh sync
+   * payload). The 12-byte IV is prepended and bound as AES-GCM AAD.
+   */
+  async encryptMessage(message: string): Promise<ArrayBuffer> {
+    if (!this.key) throw new Error('Key not initialized');
+    const data = new TextEncoder().encode(message).buffer;
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv, additionalData: iv },
+      this.key,
+      data
+    );
+    const output = new Uint8Array(12 + ciphertext.byteLength);
+    output.set(iv, 0);
+    output.set(new Uint8Array(ciphertext), 12);
+    return output.buffer;
+  }
+
+  /** Decrypt a control message produced by encryptMessage(). */
+  async decryptMessage(buffer: ArrayBuffer): Promise<string> {
+    if (!this.key) throw new Error('Key not initialized');
+    const bytes = new Uint8Array(buffer);
+    if (bytes.byteLength < 12 + 16) {
+      throw new Error('PeerVault: encrypted message is too short');
+    }
+    const iv = bytes.slice(0, 12);
+    const ciphertext = bytes.slice(12);
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv, additionalData: iv },
+      this.key,
+      ciphertext
+    );
+    return new TextDecoder().decode(plaintext);
+  }
+
   async decryptChunk(
     iv: Uint8Array,
     ciphertext: ArrayBuffer,
