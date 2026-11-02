@@ -445,8 +445,13 @@ WebRTC requires a secure context (`wss://`). Deploy the relay behind an SSL-term
 | **Server Storage** | Zero | Yes | Yes | Yes |
 | **Bandwidth Cost** | Free | Paid Tiers | Paid Tiers | Paid |
 | **Post-Quantum** | **Yes — ML-KEM-768 + P-256 (wasm)** | No | No | No |
-| **Resumable transfers** | No | Yes | Yes | No |
+| **Resumable transfers** | Manual (chunk bitmap) | Yes | Yes | No |
 | **Works behind symmetric NAT** | Only with your own TURN | Yes | Yes | Yes |
+
+PeerVault ships the primitives for resumption (`receivedBitmap()`,
+`requestMissingChunks()`, `resendChunks()`) but not an automatic journal. The
+application must persist the bitmap, reopen the sink, reconnect, and request the
+missing ranges. See [Known Limitations](#known-limitations).
 
 ---
 
@@ -456,10 +461,10 @@ WebRTC requires a secure context (`wss://`). Deploy the relay behind an SSL-term
 PeerVault transfers flat arrays of files. Zip folder contents before passing to `addFiles()`.
 
 **Q: What if the browser tab is closed?**
-The transfer fails. Both peers must stay connected for the duration.
+The transfer stops. If the application persisted `receivedBitmap()`, it can reopen the sink, reconnect, and call `requestMissingChunks()` to resume from the missing ranges. The SDK does not ship an automatic cross-reload journal.
 
 **Q: Is there a file size limit?**
-Limited by receiver RAM, at roughly 1.5x the file size in peak memory. `MAX_CHUNKS` caps a declared transfer at 1,000,000 chunks (64 GB). Multi-GB transfers need a desktop with headroom; there is no streaming-to-disk path.
+Without a sink, the receiver assembles a `Blob` in RAM at roughly 1.5x the file size. Pass `createOpfsSink()` or `createFileSystemSink()` to write each decrypted chunk at its byte offset; peak memory then stays at one chunk, so multi-GB transfers are limited by the OPFS/file-system quota rather than RAM. `MAX_CHUNKS` caps a declared transfer at 1,000,000 chunks (64 GB).
 
 ---
 
