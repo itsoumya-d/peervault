@@ -92,6 +92,37 @@ Handshake latency: p50 **0.836 ms**, p95 **1.082 ms**.
 These are single-threaded JavaScript/wasm numbers and will vary by device.
 They are well below the per-transfer cost of the 64 KB AES-GCM chunk loop.
 
+### Windows 11 (RTX 2060 host) local runs — 2026-11-04
+
+Re-ran against the same wasm core (49,446 bytes, restored from the bundled
+base64 since `cargo` was not installed on this host; the artifact was
+byte-identical to the checked-in `mlkem-wasm.generated.ts` payload).
+
+`npm run bench:pqc` (250 KEM iterations, 50 handshakes):
+
+| Operation | Mean | Throughput |
+|---|---:|---:|
+| ML-KEM-768 keygen | 0.085 ms | 11,710 ops/s |
+| ML-KEM-768 encapsulate | 0.086 ms | 11,612 ops/s |
+| ML-KEM-768 decapsulate | 0.083 ms | 12,025 ops/s |
+| Full hybrid handshake | 2.252 ms | 444 ops/s |
+
+Handshake latency: p50 **2.221 ms**, p95 **2.668 ms**. Raw JSON:
+[`sdk/bench-pqc.local.json`](../sdk/bench-pqc.local.json).
+
+`npm run bench:memory` (sparse-file/discarding-sink, 1 GB, 16,384 chunks,
+no real WebRTC):
+
+| Phase | Baseline RSS | Peak RSS | Delta |
+|---|---:|---:|---:|
+| Sender | 28.22 MB | 67.67 MB | **39.45 MB** |
+| Receiver | 53.36 MB | 69.45 MB | **16.09 MB** |
+
+Raw JSON: [`sdk/bench-memory.local.json`](../sdk/bench-memory.local.json).
+The receiver path remains below the 32 MB target only in the Apple Silicon
+run (3.02 MB); on Windows 11 it measures 16.09 MB and the sender 39.45 MB.
+These are not WebRTC transfer benchmarks.
+
 ## Reproduce
 
 ```bash
